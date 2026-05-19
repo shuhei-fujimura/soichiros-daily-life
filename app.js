@@ -385,7 +385,6 @@ function pickVideoFile() {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "video/*";
-    input.capture = "environment";
     input.addEventListener("change", () => resolve(input.files?.[0] || null), { once: true });
     input.click();
   });
@@ -767,7 +766,33 @@ function makeVideoInsightItem(v) {
     link.textContent = "見る";
     row.append(link);
   }
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "insight-link insight-link-danger";
+  del.textContent = "削除";
+  del.addEventListener("click", () => deleteVideo(v, del));
+  row.append(del);
   return row;
+}
+
+async function deleteVideo(v, button) {
+  if (!confirm(`「${v.trickName || "動画"}」を削除しますか？\nこの操作は取り消せません。`)) return;
+  button.disabled = true;
+  button.textContent = "削除中";
+  try {
+    if (v.storagePath) {
+      try {
+        await deleteObject(storageRef(storage, v.storagePath));
+      } catch (e) {
+        if (e?.code !== "storage/object-not-found") throw e;
+      }
+    }
+    await deleteDoc(doc(db, "videos", v.id));
+  } catch (e) {
+    button.disabled = false;
+    button.textContent = "削除";
+    alert("削除できませんでした: " + e.message);
+  }
 }
 
 function renderInsightList(container, items, emptyText) {

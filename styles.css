@@ -1558,3 +1558,9 @@ main {
   background: #22d3ee;
   transition: width 0.2s ease;
 }
+
+.insight-link-danger {
+  border-color: #dc2626;
+  color: #dc2626;
+}
+.insight-link-danger:hover { background: #fee2e2; }
