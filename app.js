@@ -143,6 +143,7 @@ onAuthStateChanged(auth, (user) => {
     els.loginOverlay.hidden = true;
     els.appShell.hidden = false;
     els.parentUser.textContent = `ログイン中: ${user.email}`;
+    applyRoleVisibility(user);
     if (!bootDone) {
       bootDone = true;
       boot();
@@ -165,6 +166,24 @@ function isFamilyEmail(email) {
     "0522fujimura@gmail.com",
     "so3215.fuji@gmail.com",
   ].includes(email);
+}
+
+function isParentEmail(email) {
+  return [
+    "s.fujimura0406@gmail.com",
+    "0522fujimura@gmail.com",
+  ].includes(email);
+}
+
+function applyRoleVisibility(user) {
+  const isParent = user && isParentEmail(user.email);
+  document.querySelectorAll('[data-view-target="parentView"]').forEach((el) => {
+    el.hidden = !isParent;
+  });
+  const parentView = document.getElementById("parentView");
+  if (parentView && !isParent && parentView.classList.contains("active-view")) {
+    document.querySelector('[data-view-target="homeView"]')?.click();
+  }
 }
 
 els.loginButton.addEventListener("click", async () => {
