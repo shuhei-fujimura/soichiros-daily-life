@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tricks → Firestore 投入ツール</title>
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; line-height: 1.6; }
+    button { font-size: 16px; padding: 12px 20px; margin: 8px 8px 8px 0; border-radius: 8px; border: 1px solid #1d4ed8; background: #1d4ed8; color: white; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.secondary { background: white; color: #1d4ed8; }
+    #log { background: #111; color: #0f0; padding: 12px; border-radius: 8px; font-family: ui-monospace, monospace; font-size: 13px; white-space: pre-wrap; max-height: 480px; overflow: auto; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    h1 { font-size: 20px; }
+    .ok { color: #16a34a; font-weight: bold; }
+    .err { color: #dc2626; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>Tricks → Firestore 投入ツール</h1>
+  <p>このページは1回だけ使う使い捨てツールです。投入が終わったら閉じてOK。</p>
+
+  <div class="row">
+    <button id="signInBtn">① Googleでログイン</button>
+    <span id="userInfo"></span>
+  </div>
+  <div class="row">
+    <button id="loadBtn" disabled class="secondary">② tricks.jsonを読み込む</button>
+    <button id="uploadBtn" disabled>③ Firestoreに投入</button>
+    <button id="settingsBtn" disabled class="secondary">④ Today's 5 初期設定</button>
+  </div>
+
+  <h3>ログ</h3>
+  <pre id="log">準備OK。①からどうぞ。\n</pre>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-app.js";
+    import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-auth.js";
+    import { getFirestore, doc, setDoc, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyAMjWM5i4MfRNvYwHbSs_BrvG4trTP22bA",
+      authDomain: "soichiros-daily-life.firebaseapp.com",
+      projectId: "soichiros-daily-life",
+      storageBucket: "soichiros-daily-life.firebasestorage.app",
+      messagingSenderId: "297000197202",
+      appId: "1:297000197202:web:932e207cdb95eb7bcb938b"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    const logEl = document.getElementById("log");
+    const userInfo = document.getElementById("userInfo");
+    const signInBtn = document.getElementById("signInBtn");
+    const loadBtn = document.getElementById("loadBtn");
+    const uploadBtn = document.getElementById("uploadBtn");
+    const settingsBtn = document.getElementById("settingsBtn");
+
+    let tricks = null;
+
+    function log(msg, cls = "") {
+      const span = cls ? `<span class="${cls}">${msg}</span>` : msg;
+      logEl.innerHTML += span + "\n";
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function parseTarget(target) {
+      const m = String(target || "").match(/^(\d+)\s*(.*)$/);
+      if (!m) return { count: 1, unit: String(target || "") };
+      return { count: Number(m[1]), unit: m[2].trim() || "回" };
+    }
+
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        userInfo.textContent = `✓ ${user.email}`;
+        loadBtn.disabled = false;
+        log(`ログイン成功: ${user.email}`, "ok");
+      } else {
+        userInfo.textContent = "";
+      }
+    });
+
+    signInBtn.addEventListener("click", async () => {
+      try {
+        log("Googleログイン画面を開いています…");
+        await signInWithPopup(auth, new GoogleAuthProvider());
+      } catch (e) {
+        log(`ログイン失敗: ${e.message}`, "err");
+      }
+    });
+
+    loadBtn.addEventListener("click", async () => {
+      try {
+        log("tricks.jsonを読み込み中…");
+        const res = await fetch("./data/tricks.json", { cache: "no-store" });
+        tricks = await res.json();
+        log(`読み込みOK: ${tricks.length}件`, "ok");
+        uploadBtn.disabled = false;
+        settingsBtn.disabled = false;
+      } catch (e) {
+        log(`読み込み失敗: ${e.message}`, "err");
+      }
+    });
+
+    uploadBtn.addEventListener("click", async () => {
+      if (!tricks) return;
+      uploadBtn.disabled = true;
+      try {
+        log(`Firestoreに投入開始: ${tricks.length}件`);
+        const CHUNK = 400;
+        for (let i = 0; i < tricks.length; i += CHUNK) {
+          const batch = writeBatch(db);
+          const slice = tricks.slice(i, i + CHUNK);
+          for (const t of slice) {
+            const { count, unit } = parseTarget(t.target);
+            const ref = doc(db, "tricks", t.id);
+            batch.set(ref, {
+              no: t.no,
+              name: t.name,
+              kind: t.kind,
+              level: t.level,
+              target: t.target || "",
+              targetCount: count,
+              targetUnit: unit,
+              memo: t.memo || "",
+              videoSearchUrl: t.video || "",
+              active: true,
+              updatedAt: serverTimestamp(),
+            });
+          }
+          await batch.commit();
+          log(`  ${Math.min(i + CHUNK, tricks.length)} / ${tricks.length} 件 投入完了`);
+        }
+        log("全件投入完了！", "ok");
+      } catch (e) {
+        log(`投入失敗: ${e.message}`, "err");
+        log("→ Firestoreルールが公開されているか、家族の許可リストに自分のメールが入っているか確認してください。", "err");
+        uploadBtn.disabled = false;
+      }
+    });
+
+    settingsBtn.addEventListener("click", async () => {
+      if (!tricks) return;
+      settingsBtn.disabled = true;
+      try {
+        const todays5 = tricks.slice(0, 5).map((t) => t.id);
+        await setDoc(doc(db, "settings", "app"), {
+          todays5,
+          dailyMessage: "",
+          updatedAt: serverTimestamp(),
+        });
+        log(`Today's 5 初期設定OK: ${todays5.join(", ")}`, "ok");
+        log("→ アプリの親設定で後から変更できます。", "ok");
+      } catch (e) {
+        log(`設定失敗: ${e.message}`, "err");
+        settingsBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
