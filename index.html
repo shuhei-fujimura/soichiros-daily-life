@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#1d4ed8" />
     <title>Soichiro's Daily Life</title>
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="stylesheet" href="./styles.css?v=20260519-v11" />
+    <link rel="stylesheet" href="./styles.css?v=20260519-v12" />
   </head>
   <body>
     <div class="app-shell">
@@ -233,7 +233,10 @@
                 <span>合言葉</span>
                 <input id="uploadTokenInput" type="password" placeholder="Apps Script側と同じ文字" autocomplete="off" />
               </label>
-              <button id="saveUploadSettingsButton" class="small-button primary-small-button" type="button">保存</button>
+              <div class="settings-actions">
+                <button id="saveUploadSettingsButton" class="small-button primary-small-button" type="button">保存</button>
+                <button id="testUploadSettingsButton" class="small-button" type="button">接続テスト</button>
+              </div>
               <p id="uploadSettingsStatus" class="panel-note"></p>
             </div>
             <div id="parentPinnedList" class="library-list"></div>
@@ -267,6 +270,6 @@
       </article>
     </template>
 
-    <script src="./app.js?v=20260519-v11"></script>
+    <script src="./app.js?v=20260519-v12"></script>
   </body>
 </html>

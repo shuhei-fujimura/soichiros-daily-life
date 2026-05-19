@@ -1003,6 +1003,12 @@ main {
   font-size: 14px;
 }
 
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

@@ -67,6 +67,7 @@ const els = {
   uploadEndpointInput: document.getElementById("uploadEndpointInput"),
   uploadTokenInput: document.getElementById("uploadTokenInput"),
   saveUploadSettingsButton: document.getElementById("saveUploadSettingsButton"),
+  testUploadSettingsButton: document.getElementById("testUploadSettingsButton"),
   uploadSettingsStatus: document.getElementById("uploadSettingsStatus"),
 };
 
@@ -156,6 +157,9 @@ async function boot() {
   els.searchInput.value = state.query;
   els.uploadEndpointInput.value = state.uploadSettings.endpoint || "";
   els.uploadTokenInput.value = state.uploadSettings.token || "";
+  if (location.protocol === "file:") {
+    els.uploadSettingsStatus.textContent = "file直開きでは動画保存が不安定です。GitHub Pages版かlocalhostで開いてください。";
+  }
   els.todayLabel.textContent = `${state.date} のチャレンジ`;
   renderDailyMessage();
   render();
@@ -474,6 +478,12 @@ async function refreshPendingVideos() {
 
 async function uploadPracticeVideo(trick, button) {
   const endpoint = (state.uploadSettings.endpoint || "").trim();
+  if (location.protocol === "file:") {
+    button.textContent = "GitHub版で";
+    els.uploadSettingsStatus.textContent = "動画保存はfile直開きではなく、GitHub Pages版かlocalhost版で試してください。";
+    window.setTimeout(() => { button.textContent = "動画を撮る"; }, 2200);
+    return;
+  }
   if (!endpoint) {
     button.textContent = "親設定でURL";
     window.setTimeout(() => { button.textContent = "動画を撮る"; }, 1800);
@@ -557,6 +567,45 @@ async function uploadPracticeVideo(trick, button) {
       button.disabled = false;
       button.textContent = "動画を撮る";
     }, 1600);
+  }
+}
+
+async function testUploadConnection() {
+  const endpoint = els.uploadEndpointInput.value.trim();
+  const token = els.uploadTokenInput.value.trim();
+  state.uploadSettings = { endpoint, token };
+  saveState();
+
+  if (location.protocol === "file:") {
+    els.uploadSettingsStatus.textContent = "file直開きでは接続テストできません。GitHub Pages版かlocalhost版で開いてください。";
+    return;
+  }
+  if (!endpoint || !token) {
+    els.uploadSettingsStatus.textContent = "URLと合言葉を入れてから接続テストしてください。";
+    return;
+  }
+
+  els.testUploadSettingsButton.disabled = true;
+  els.testUploadSettingsButton.textContent = "確認中";
+  els.uploadSettingsStatus.textContent = "Apps Scriptに接続しています...";
+  try {
+    const result = await jsonpRequest(endpoint, {
+      action: "recentVideos",
+      token,
+      limit: 1,
+    });
+    if (result?.ok) {
+      els.uploadSettingsStatus.textContent = `接続OKです。スプレッドシート: ${result.spreadsheetUrl || "確認できました"}`;
+    } else if (result?.error === "invalid token") {
+      els.uploadSettingsStatus.textContent = "合言葉が一致していません。Apps ScriptのCONFIG.TOKENと同じ文字を入れてください。";
+    } else {
+      els.uploadSettingsStatus.textContent = `接続はできましたがエラーです: ${result?.error || "不明なエラー"}`;
+    }
+  } catch (error) {
+    els.uploadSettingsStatus.textContent = `接続できませんでした: ${error.message}`;
+  } finally {
+    els.testUploadSettingsButton.disabled = false;
+    els.testUploadSettingsButton.textContent = "接続テスト";
   }
 }
 
@@ -1049,6 +1098,8 @@ els.saveUploadSettingsButton.addEventListener("click", () => {
     ? "動画保存先を保存しました。"
     : "URLが空です。動画保存はまだ使えません。";
 });
+
+els.testUploadSettingsButton.addEventListener("click", testUploadConnection);
 
 document.querySelectorAll("[data-view-target]").forEach((button) => {
   button.addEventListener("click", () => {
