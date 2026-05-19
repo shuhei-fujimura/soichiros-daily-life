@@ -1495,6 +1495,7 @@ main {
 }
 
 /* Firebase版 追加スタイル */
+[hidden] { display: none !important; }
 .login-overlay {
   position: fixed;
   inset: 0;
