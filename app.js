@@ -73,6 +73,11 @@ const els = {
   homePinnedList: document.getElementById("homePinnedList"),
   pinnedHelp: document.getElementById("pinnedHelp"),
   clearPinnedButton: document.getElementById("clearPinnedButton"),
+  drawNextButton: document.getElementById("drawNextButton"),
+  nextHelp: document.getElementById("nextHelp"),
+  nextChallengeResult: document.getElementById("nextChallengeResult"),
+  gachaMachine: document.getElementById("gachaMachine"),
+  gachaBall: document.getElementById("gachaBall"),
   librarySummary: document.getElementById("librarySummary"),
   landedCount: document.getElementById("landedCount"),
   goalClearedCount: document.getElementById("goalClearedCount"),
@@ -119,6 +124,7 @@ function loadLocal() {
     level: "すべて",
     saved: [],
     dailyFocus: { date: "", ids: [] },
+    nextChallenge: null,
   };
   try {
     const parsed = JSON.parse(localStorage.getItem(LOCAL_KEY) || "null");
@@ -620,6 +626,64 @@ function makeRoutineCard(items, index) {
   return card;
 }
 
+function visibleHomeIds() {
+  return new Set([
+    ...(local.dailyFocus.ids || []),
+    ...(pinnedTodayDoc.trickIds || []),
+  ]);
+}
+
+function nextChallengePool() {
+  const excluded = visibleHomeIds();
+  if (local.nextChallenge?.date === todayKey() && local.nextChallenge.id) {
+    excluded.add(local.nextChallenge.id);
+  }
+  const unseen = tricks.filter((t) => !excluded.has(t.id));
+  return unseen.length ? unseen : tricks;
+}
+
+function renderNextChallenge() {
+  let current = local.nextChallenge?.date === todayKey()
+    ? findTrick(local.nextChallenge.id)
+    : null;
+  if (current && visibleHomeIds().has(current.id)) {
+    local.nextChallenge = null;
+    saveLocal();
+    current = null;
+  }
+  els.nextHelp.hidden = Boolean(current);
+  els.gachaMachine.classList.toggle("result-ready", Boolean(current));
+  els.nextChallengeResult.replaceChildren(
+    current ? renderCard(current, { compact: true }) : document.createTextNode("")
+  );
+}
+
+function drawNextChallenge() {
+  const pool = nextChallengePool();
+  if (!pool.length) return;
+  const selected = pool[Math.floor(Math.random() * pool.length)];
+  local.nextChallenge = {
+    id: selected.id,
+    date: todayKey(),
+    drawnAt: new Date().toISOString(),
+  };
+  saveLocal();
+
+  els.gachaBall.classList.remove("rolling");
+  els.gachaMachine.classList.remove("result-ready");
+  els.gachaMachine.classList.add("is-spinning");
+  els.nextChallengeResult.classList.add("drawing");
+  els.nextChallengeResult.replaceChildren();
+  window.requestAnimationFrame(() => {
+    els.gachaBall.classList.add("rolling");
+    window.setTimeout(() => {
+      renderNextChallenge();
+      els.nextChallengeResult.classList.remove("drawing");
+      els.gachaMachine.classList.remove("is-spinning");
+    }, 960);
+  });
+}
+
 function renderRoutines() {
   const source = focusTricks();
   const routines = [0, 1, 2].map((offset) => {
@@ -921,6 +985,7 @@ function rerender() {
   els.focusList.replaceChildren(...focus.map((t) => renderCard(t, { compact: true })));
   renderRoutines();
   renderPinned();
+  renderNextChallenge();
   const rows = filteredTricks();
   els.emptyState.hidden = !(todayGoalClearedIds().length === total && total > 0);
   els.trickList.replaceChildren(...rows.map((t) => renderCard(t)));
@@ -931,6 +996,7 @@ function rerender() {
 els.searchInput.addEventListener("input", (e) => { local.query = e.target.value; saveLocal(); rerender(); });
 els.doneToggle.addEventListener("click", () => { els.doneList.hidden = !els.doneList.hidden; });
 els.clearPinnedButton.addEventListener("click", clearPinned);
+els.drawNextButton.addEventListener("click", drawNextChallenge);
 
 document.querySelectorAll("[data-view-target]").forEach((button) => {
   button.addEventListener("click", () => {

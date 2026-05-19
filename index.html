@@ -83,6 +83,38 @@
             <div id="homePinnedList" class="horizontal-list"></div>
           </section>
 
+          <section class="next-panel" aria-label="次のチャレンジ">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Next Challenge</p>
+                <h2>次のチャレンジ</h2>
+              </div>
+            </div>
+            <div id="gachaMachine" class="gacha-machine">
+              <div class="gacha-dome" aria-hidden="true">
+                <span class="mini-capsule cap-1"></span>
+                <span class="mini-capsule cap-2"></span>
+                <span class="mini-capsule cap-3"></span>
+                <span class="mini-capsule cap-4"></span>
+                <span class="mini-capsule cap-5"></span>
+                <span class="mini-capsule cap-6"></span>
+              </div>
+              <div class="gacha-body">
+                <div class="gacha-window" aria-hidden="true">
+                  <span id="gachaBall" class="gacha-ball"></span>
+                </div>
+                <button id="drawNextButton" class="gacha-handle" type="button" aria-label="次のチャレンジを回す">
+                  <span></span>
+                </button>
+              </div>
+              <div class="gacha-chute" aria-hidden="true">
+                <span class="gacha-door"></span>
+              </div>
+            </div>
+            <p id="nextHelp" class="panel-note">ハンドルをタップすると、カプセルから次のチャレンジが出ます。</p>
+            <div id="nextChallengeResult" class="next-result"></div>
+          </section>
+
           <section class="routine-panel" aria-label="組み合わせてやってみよう">
             <div class="section-heading">
               <div>
