@@ -20,6 +20,7 @@ function doPost(e) {
     }
     return jsonResponse({ ok: false, error: "unknown kind" });
   } catch (error) {
+    logUploadError("doPost", error.message, e && e.postData && e.postData.contents);
     return jsonResponse({ ok: false, error: error.message });
   }
 }
@@ -47,63 +48,75 @@ function doGet(e) {
 }
 
 function savePracticeVideo(payload) {
-  const folder = getOrCreateFolder(CONFIG.DRIVE_FOLDER_NAME);
-  const dayFolder = getOrCreateChildFolder(folder, payload.date || dateText(new Date()));
-  const safeName = sanitizeFileName([
-    payload.date || dateText(new Date()),
-    payload.trickNo || payload.trickId || "trick",
-    payload.trickName || "practice",
-    new Date().getTime(),
-  ].join("_"));
-  const extension = extensionForMime(payload.mimeType || "video/mp4");
-  const bytes = Utilities.base64Decode(payload.base64 || "");
-  const blob = Utilities.newBlob(bytes, payload.mimeType || "video/mp4", `${safeName}.${extension}`);
-  const file = dayFolder.createFile(blob);
-  const spreadsheet = getOrCreateSpreadsheet(CONFIG.SPREADSHEET_NAME);
-  const sheet = getOrCreateSheet(spreadsheet, CONFIG.VIDEO_SHEET_NAME, [
-    "recordedAt",
-    "date",
-    "trickId",
-    "trickNo",
-    "trickName",
-    "kind",
-    "level",
-    "count",
-    "target",
-    "landed",
-    "goalCleared",
-    "fileName",
-    "fileSize",
-    "driveFileId",
-    "driveUrl",
-    "localId",
-  ]);
+  try {
+    const folder = getOrCreateFolder(CONFIG.DRIVE_FOLDER_NAME);
+    const dayFolder = getOrCreateChildFolder(folder, payload.date || dateText(new Date()));
+    const safeName = sanitizeFileName([
+      payload.date || dateText(new Date()),
+      payload.trickNo || payload.trickId || "trick",
+      payload.trickName || "practice",
+      new Date().getTime(),
+    ].join("_"));
+    const extension = extensionForMime(payload.mimeType || "video/mp4");
+    const bytes = Utilities.base64Decode(payload.base64 || "");
+    const blob = Utilities.newBlob(bytes, payload.mimeType || "video/mp4", `${safeName}.${extension}`);
+    const file = dayFolder.createFile(blob);
+    const spreadsheet = getOrCreateSpreadsheet(CONFIG.SPREADSHEET_NAME);
+    const sheet = getOrCreateSheet(spreadsheet, CONFIG.VIDEO_SHEET_NAME, [
+      "recordedAt",
+      "date",
+      "trickId",
+      "trickNo",
+      "trickName",
+      "kind",
+      "level",
+      "count",
+      "target",
+      "landed",
+      "goalCleared",
+      "fileName",
+      "fileSize",
+      "driveFileId",
+      "driveUrl",
+      "localId",
+    ]);
 
-  sheet.appendRow([
-    new Date(),
-    payload.date || "",
-    payload.trickId || "",
-    payload.trickNo || "",
-    payload.trickName || "",
-    payload.trickKind || "",
-    payload.trickLevel || "",
-    payload.count || 0,
-    payload.target || "",
-    Boolean(payload.landed),
-    Boolean(payload.goalCleared),
-    payload.fileName || file.getName(),
-    payload.fileSize || "",
-    file.getId(),
-    file.getUrl(),
-    payload.localId || "",
-  ]);
+    sheet.appendRow([
+      new Date(),
+      payload.date || "",
+      payload.trickId || "",
+      payload.trickNo || "",
+      payload.trickName || "",
+      payload.trickKind || "",
+      payload.trickLevel || "",
+      payload.count || 0,
+      payload.target || "",
+      Boolean(payload.landed),
+      Boolean(payload.goalCleared),
+      payload.fileName || file.getName(),
+      payload.fileSize || "",
+      file.getId(),
+      file.getUrl(),
+      payload.localId || "",
+    ]);
 
-  return {
-    ok: true,
-    fileId: file.getId(),
-    fileUrl: file.getUrl(),
-    spreadsheetUrl: spreadsheet.getUrl(),
-  };
+    return {
+      ok: true,
+      fileId: file.getId(),
+      fileUrl: file.getUrl(),
+      spreadsheetUrl: spreadsheet.getUrl(),
+    };
+  } catch (error) {
+    logUploadError("savePracticeVideo", error.message, JSON.stringify({
+      localId: payload.localId,
+      trickId: payload.trickId,
+      trickName: payload.trickName,
+      fileName: payload.fileName,
+      fileSize: payload.fileSize,
+      mimeType: payload.mimeType,
+    }));
+    throw error;
+  }
 }
 
 function getVideoStatus(localId) {
@@ -244,6 +257,22 @@ function getOrCreateSheet(spreadsheet, name, headers) {
     sheet.appendRow(headers);
   }
   return sheet;
+}
+
+function logUploadError(stage, message, detail) {
+  const spreadsheet = getOrCreateSpreadsheet(CONFIG.SPREADSHEET_NAME);
+  const sheet = getOrCreateSheet(spreadsheet, "upload_errors", [
+    "recordedAt",
+    "stage",
+    "message",
+    "detail",
+  ]);
+  sheet.appendRow([
+    new Date(),
+    stage,
+    message,
+    String(detail || "").slice(0, 2000),
+  ]);
 }
 
 function jsonResponse(value) {

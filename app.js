@@ -410,23 +410,53 @@ function jsonpRequest(endpoint, params) {
 async function refreshVideoUpload(localId) {
   const endpoint = (state.uploadSettings.endpoint || "").trim();
   if (!endpoint || !localId) return null;
-  const result = await jsonpRequest(endpoint, {
-    action: "videoStatus",
-    token: state.uploadSettings.token || "",
+  rememberVideoUpload({
     localId,
+    status: "checking",
+    lastCheckMessage: "保存結果を確認中です。",
+    lastCheckedAt: new Date().toISOString(),
   });
-  if (result?.ok && result.video) {
+  renderGrowth();
+  try {
+    const result = await jsonpRequest(endpoint, {
+      action: "videoStatus",
+      token: state.uploadSettings.token || "",
+      localId,
+    });
+    if (result?.ok && result.video) {
+      rememberVideoUpload({
+        localId,
+        status: "saved",
+        driveUrl: result.video.driveUrl,
+        driveFileId: result.video.driveFileId,
+        spreadsheetUrl: result.spreadsheetUrl || "",
+        savedAt: result.video.recordedAt || new Date().toISOString(),
+        lastCheckMessage: "Drive保存を確認しました。",
+        lastCheckedAt: new Date().toISOString(),
+      });
+      renderGrowth();
+      return result;
+    }
     rememberVideoUpload({
       localId,
-      status: "saved",
-      driveUrl: result.video.driveUrl,
-      driveFileId: result.video.driveFileId,
-      spreadsheetUrl: result.spreadsheetUrl || "",
-      savedAt: result.video.recordedAt || new Date().toISOString(),
+      status: result?.error === "invalid token" ? "failed" : "sent",
+      lastCheckMessage: result?.error === "invalid token"
+        ? "合言葉が一致していません。"
+        : "まだDrive保存が見つかりません。",
+      lastCheckedAt: new Date().toISOString(),
     });
     renderGrowth();
+    return result;
+  } catch (error) {
+    rememberVideoUpload({
+      localId,
+      status: "failed",
+      lastCheckMessage: error.message,
+      lastCheckedAt: new Date().toISOString(),
+    });
+    renderGrowth();
+    return { ok: false, error: error.message };
   }
-  return result;
 }
 
 async function refreshPendingVideos() {
@@ -799,11 +829,22 @@ function makeInsightItem(title, meta, value = "") {
   return item;
 }
 
+function videoStatusLabel(item) {
+  if (item.driveUrl || item.status === "saved") return "保存済み";
+  if (item.status === "checking") return "確認中";
+  if (item.status === "failed") return "失敗";
+  return "未保存";
+}
+
 function makeVideoInsightItem(item) {
   const row = makeInsightItem(
     item.trickName || "動画",
-    `${item.date || "-"} / ${Math.round((Number(item.fileSize || 0) / 1024 / 1024) * 10) / 10}MB`,
-    item.status === "failed" ? "失敗" : item.driveUrl ? "保存済み" : "確認中"
+    [
+      item.date || "-",
+      `${Math.round((Number(item.fileSize || 0) / 1024 / 1024) * 10) / 10}MB`,
+      item.lastCheckMessage || null
+    ].filter(Boolean).join(" / "),
+    videoStatusLabel(item)
   );
   if (item.driveUrl) {
     const link = document.createElement("a");
@@ -813,12 +854,16 @@ function makeVideoInsightItem(item) {
     link.rel = "noreferrer";
     link.textContent = "見る";
     row.append(link);
-  } else if (item.status === "sent") {
+  } else if (item.status !== "checking") {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "insight-link";
-    button.textContent = "確認";
-    button.addEventListener("click", () => refreshVideoUpload(item.localId));
+    button.textContent = item.status === "failed" ? "再確認" : "確認";
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      button.textContent = "確認中";
+      await refreshVideoUpload(item.localId);
+    });
     row.append(button);
   }
   return row;
