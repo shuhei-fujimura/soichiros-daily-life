@@ -6,10 +6,25 @@
     <meta name="theme-color" content="#1d4ed8" />
     <title>Soichiro's Daily Life</title>
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="stylesheet" href="./styles.css?v=20260519-v12" />
+    <link rel="stylesheet" href="./styles.css?v=20260520-fb1" />
   </head>
   <body>
-    <div class="app-shell">
+    <div id="loginOverlay" class="login-overlay">
+      <div class="login-card">
+        <p class="kicker">Skate Practice</p>
+        <h1>Soichiro's Daily Life</h1>
+        <p>家族のGoogleアカウントでログインしてください。</p>
+        <button id="loginButton" type="button" class="login-button">Googleでログイン</button>
+        <p id="loginStatus" class="panel-note"></p>
+      </div>
+    </div>
+
+    <div id="uploadProgress" class="upload-progress" hidden>
+      <p id="uploadProgressLabel">アップロード中…</p>
+      <div class="upload-progress-track"><div id="uploadProgressBar" class="upload-progress-bar"></div></div>
+    </div>
+
+    <div id="appShell" class="app-shell" hidden>
       <header class="topbar">
         <div>
           <p class="kicker">Skate Practice</p>
@@ -66,38 +81,6 @@
             </div>
             <p id="pinnedHelp" class="panel-note">親設定ページで、今日やる技を選べます。</p>
             <div id="homePinnedList" class="horizontal-list"></div>
-          </section>
-
-          <section class="next-panel" aria-label="次のチャレンジ">
-            <div class="section-heading">
-              <div>
-                <p class="section-kicker">Next Challenge</p>
-                <h2>次のチャレンジ</h2>
-              </div>
-            </div>
-            <div id="gachaMachine" class="gacha-machine">
-              <div class="gacha-dome" aria-hidden="true">
-                <span class="mini-capsule cap-1"></span>
-                <span class="mini-capsule cap-2"></span>
-                <span class="mini-capsule cap-3"></span>
-                <span class="mini-capsule cap-4"></span>
-                <span class="mini-capsule cap-5"></span>
-                <span class="mini-capsule cap-6"></span>
-              </div>
-              <div class="gacha-body">
-                <div class="gacha-window" aria-hidden="true">
-                  <span id="gachaBall" class="gacha-ball"></span>
-                </div>
-                <button id="drawNextButton" class="gacha-handle" type="button" aria-label="次のチャレンジを回す">
-                  <span></span>
-                </button>
-              </div>
-              <div class="gacha-chute" aria-hidden="true">
-                <span class="gacha-door"></span>
-              </div>
-            </div>
-            <p id="nextHelp" class="panel-note">ハンドルをタップすると、カプセルから次のチャレンジが出ます。</p>
-            <div id="nextChallengeResult" class="next-result"></div>
           </section>
 
           <section class="routine-panel" aria-label="組み合わせてやってみよう">
@@ -222,22 +205,13 @@
               </div>
               <span id="parentSummary" class="summary-pill">0個</span>
             </div>
-            <p class="panel-note">このページだけで、トップに固定する技を選べます。この端末に保存されます。</p>
-            <div class="upload-settings" aria-label="動画保存設定">
-              <h3>動画保存設定</h3>
-              <label>
-                <span>Apps Script WebアプリURL</span>
-                <input id="uploadEndpointInput" type="url" placeholder="https://script.google.com/macros/s/..." autocomplete="off" />
-              </label>
-              <label>
-                <span>合言葉</span>
-                <input id="uploadTokenInput" type="password" placeholder="Apps Script側と同じ文字" autocomplete="off" />
-              </label>
+            <p class="panel-note">このページだけで、トップに固定する技を選べます。Firestoreで家族の端末に自動同期されます。</p>
+            <div class="upload-settings" aria-label="アカウント">
+              <h3>アカウント</h3>
+              <p id="parentUser" class="panel-note"></p>
               <div class="settings-actions">
-                <button id="saveUploadSettingsButton" class="small-button primary-small-button" type="button">保存</button>
-                <button id="testUploadSettingsButton" class="small-button" type="button">接続テスト</button>
+                <button id="logoutButton" class="small-button" type="button">ログアウト</button>
               </div>
-              <p id="uploadSettingsStatus" class="panel-note"></p>
             </div>
             <div id="parentPinnedList" class="library-list"></div>
             <div id="parentPickList" class="parent-pick-list"></div>
@@ -270,6 +244,6 @@
       </article>
     </template>
 
-    <script src="./app.js?v=20260519-v12"></script>
+    <script type="module" src="./app.js?v=20260520-fb1"></script>
   </body>
 </html>

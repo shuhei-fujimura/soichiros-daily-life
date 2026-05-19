@@ -1,7 +1,38 @@
-const STORAGE_KEY = "skate_challenge_state_v2";
-const OLD_STORAGE_KEY = "skate_challenge_state_v1";
-const MAX_VIDEO_BYTES = 35 * 1024 * 1024;
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-app.js";
+import {
+  getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged,
+} from "https://www.gstatic.com/firebasejs/12.13.0/firebase-auth.js";
+import {
+  getFirestore, collection, doc, query, where, orderBy, limit,
+  onSnapshot, getDocs, setDoc, addDoc, deleteDoc, serverTimestamp,
+} from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import {
+  getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject,
+} from "https://www.gstatic.com/firebasejs/12.13.0/firebase-storage.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAMjWM5i4MfRNvYwHbSs_BrvG4trTP22bA",
+  authDomain: "soichiros-daily-life.firebaseapp.com",
+  projectId: "soichiros-daily-life",
+  storageBucket: "soichiros-daily-life.firebasestorage.app",
+  messagingSenderId: "297000197202",
+  appId: "1:297000197202:web:932e207cdb95eb7bcb938b",
+};
+
+const fb = initializeApp(firebaseConfig);
+const auth = getAuth(fb);
+const db = getFirestore(fb);
+const storage = getStorage(fb);
+
+const LOCAL_KEY = "skate_local_v3";
+const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+const HISTORY_DAYS = 60;
 const todayKey = () => new Date().toLocaleDateString("sv-SE");
+const dateNDaysAgo = (n) => {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toLocaleDateString("sv-SE");
+};
 const defaultMemo = "まずはチャレンジ\nできない・わからない時は聞いてみよう";
 const dailyMessages = [
   "エジソンみたいに、失敗は発見だと思ってみよう。",
@@ -17,7 +48,7 @@ const dailyMessages = [
   "うまい人も、最初はできないところから始まった。",
   "怖いと思ったら、ちょっと小さくしてもう一回。",
   "できない技は、未来の得意技かもしれない。",
-  "今日の一回は、明日の自信になる。"
+  "今日の一回は、明日の自信になる。",
 ];
 
 const els = {
@@ -42,11 +73,6 @@ const els = {
   homePinnedList: document.getElementById("homePinnedList"),
   pinnedHelp: document.getElementById("pinnedHelp"),
   clearPinnedButton: document.getElementById("clearPinnedButton"),
-  drawNextButton: document.getElementById("drawNextButton"),
-  nextHelp: document.getElementById("nextHelp"),
-  nextChallengeResult: document.getElementById("nextChallengeResult"),
-  gachaMachine: document.getElementById("gachaMachine"),
-  gachaBall: document.getElementById("gachaBall"),
   librarySummary: document.getElementById("librarySummary"),
   landedCount: document.getElementById("landedCount"),
   goalClearedCount: document.getElementById("goalClearedCount"),
@@ -64,302 +90,295 @@ const els = {
   parentSummary: document.getElementById("parentSummary"),
   parentPinnedList: document.getElementById("parentPinnedList"),
   parentPickList: document.getElementById("parentPickList"),
-  uploadEndpointInput: document.getElementById("uploadEndpointInput"),
-  uploadTokenInput: document.getElementById("uploadTokenInput"),
-  saveUploadSettingsButton: document.getElementById("saveUploadSettingsButton"),
-  testUploadSettingsButton: document.getElementById("testUploadSettingsButton"),
-  uploadSettingsStatus: document.getElementById("uploadSettingsStatus"),
+  loginOverlay: document.getElementById("loginOverlay"),
+  loginButton: document.getElementById("loginButton"),
+  loginStatus: document.getElementById("loginStatus"),
+  appShell: document.getElementById("appShell"),
+  parentUser: document.getElementById("parentUser"),
+  logoutButton: document.getElementById("logoutButton"),
+  uploadProgress: document.getElementById("uploadProgress"),
+  uploadProgressBar: document.getElementById("uploadProgressBar"),
+  uploadProgressLabel: document.getElementById("uploadProgressLabel"),
 };
 
+let currentUser = null;
 let tricks = [];
-let state = loadState();
+let practiceLogs = [];
+let videos = [];
+let pinnedTodayDoc = { trickIds: [] };
+let settingsDoc = { todays5: [] };
 
-function fallbackState() {
-  return {
-    version: 2,
-    date: todayKey(),
-    firstUsedDate: todayKey(),
+let local = loadLocal();
+let unsubscribers = [];
+let bootDone = false;
+
+function loadLocal() {
+  const fallback = {
     query: "",
     kind: "すべて",
     level: "すべて",
     saved: [],
-    pinnedToday: [],
-    nextChallenge: null,
-    uploadSettings: { endpoint: "", token: "" },
-    videoUploads: [],
     dailyFocus: { date: "", ids: [] },
-    todayProgress: {},
-    allTimeDone: {},
-    history: {},
   };
-}
-
-function loadState() {
-  const fallback = fallbackState();
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-    if (parsed) {
-      return normalizeState({ ...fallback, ...parsed });
-    }
-
-    const old = JSON.parse(localStorage.getItem(OLD_STORAGE_KEY) || "null");
-    if (old) {
-      old.done = Array.isArray(old.done) ? old.done : [];
-      const migrated = {
-        ...fallback,
-        saved: Array.isArray(old.saved) ? old.saved : [],
-        query: old.query || "",
-        kind: old.kind || "すべて",
-        level: old.level || "すべて",
-        todayProgress: Object.fromEntries(old.done.map((id) => [id, { count: 1, landed: true, goalCleared: false }])),
-        allTimeDone: Object.fromEntries(old.done.map((id) => [id, { firstLandedDate: todayKey(), bestCount: 1, goalCleared: false }]))
-      };
-      return normalizeState(migrated);
-    }
-  } catch {
-    return fallback;
-  }
+    const parsed = JSON.parse(localStorage.getItem(LOCAL_KEY) || "null");
+    if (parsed) return { ...fallback, ...parsed };
+  } catch {}
   return fallback;
 }
 
-function normalizeState(nextState) {
-  const today = todayKey();
-  nextState.history = nextState.history || {};
-  if (nextState.date && nextState.date !== today) {
-    nextState.history[nextState.date] = nextState.todayProgress || {};
-    nextState.todayProgress = {};
-    nextState.dailyFocus = { date: "", ids: [] };
-    nextState.pinnedToday = [];
-    nextState.nextChallenge = null;
-  }
-  nextState.date = today;
-  nextState.firstUsedDate = nextState.firstUsedDate || today;
-  nextState.saved = Array.isArray(nextState.saved) ? nextState.saved : [];
-  nextState.pinnedToday = Array.isArray(nextState.pinnedToday) ? nextState.pinnedToday : [];
-  nextState.nextChallenge = nextState.nextChallenge || null;
-  nextState.uploadSettings = nextState.uploadSettings || { endpoint: "", token: "" };
-  nextState.videoUploads = Array.isArray(nextState.videoUploads) ? nextState.videoUploads : [];
-  nextState.dailyFocus = nextState.dailyFocus || { date: "", ids: [] };
-  nextState.todayProgress = nextState.todayProgress || {};
-  nextState.allTimeDone = nextState.allTimeDone || {};
-  return nextState;
+function saveLocal() {
+  localStorage.setItem(LOCAL_KEY, JSON.stringify(local));
 }
 
-function saveState() {
-  state.date = todayKey();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+onAuthStateChanged(auth, (user) => {
+  if (user && isFamilyEmail(user.email)) {
+    currentUser = user;
+    els.loginOverlay.hidden = true;
+    els.appShell.hidden = false;
+    els.parentUser.textContent = `ログイン中: ${user.email}`;
+    if (!bootDone) {
+      bootDone = true;
+      boot();
+    }
+  } else if (user && !isFamilyEmail(user.email)) {
+    els.loginStatus.textContent = `このアカウント（${user.email}）は家族リストにありません。別のアカウントでログインしてください。`;
+    signOut(auth);
+  } else {
+    currentUser = null;
+    els.appShell.hidden = true;
+    els.loginOverlay.hidden = false;
+    detachSubscriptions();
+    bootDone = false;
+  }
+});
+
+function isFamilyEmail(email) {
+  return [
+    "s.fujimura0406@gmail.com",
+    "0522fujimura@gmail.com",
+    "so3215.fuji@gmail.com",
+  ].includes(email);
+}
+
+els.loginButton.addEventListener("click", async () => {
+  els.loginStatus.textContent = "ログイン中…";
+  try {
+    await signInWithPopup(auth, new GoogleAuthProvider());
+  } catch (e) {
+    els.loginStatus.textContent = `ログイン失敗: ${e.message}`;
+  }
+});
+
+els.logoutButton.addEventListener("click", () => signOut(auth));
+
+function detachSubscriptions() {
+  unsubscribers.forEach((u) => { try { u(); } catch {} });
+  unsubscribers = [];
 }
 
 async function boot() {
-  const response = await fetch("./data/tricks.json", { cache: "no-store" });
-  tricks = await response.json();
-  ensureDailyFocus();
-  els.searchInput.value = state.query;
-  els.uploadEndpointInput.value = state.uploadSettings.endpoint || "";
-  els.uploadTokenInput.value = state.uploadSettings.token || "";
-  if (location.protocol === "file:") {
-    els.uploadSettingsStatus.textContent = "file直開きでは動画保存が不安定です。GitHub Pages版かlocalhostで開いてください。";
-  }
-  els.todayLabel.textContent = `${state.date} のチャレンジ`;
+  els.todayLabel.textContent = `${todayKey()} のチャレンジ`;
   renderDailyMessage();
-  render();
-  refreshPendingVideos();
+
+  // tricks (one-time fetch — マスターはほぼ変わらないので購読不要)
+  const tricksSnap = await getDocs(collection(db, "tricks"));
+  tricks = tricksSnap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .filter((t) => t.active !== false)
+    .sort((a, b) => (a.no || 0) - (b.no || 0));
+
+  // settings (Today's 5)
+  unsubscribers.push(onSnapshot(doc(db, "settings", "app"), (snap) => {
+    settingsDoc = snap.exists() ? snap.data() : { todays5: [] };
+    rerender();
+  }));
+
+  // pinnedToday
+  unsubscribers.push(onSnapshot(doc(db, "pinnedToday", todayKey()), (snap) => {
+    pinnedTodayDoc = snap.exists() ? snap.data() : { trickIds: [] };
+    rerender();
+  }));
+
+  // practiceLogs (60日分)
+  const since = dateNDaysAgo(HISTORY_DAYS);
+  unsubscribers.push(onSnapshot(
+    query(collection(db, "practiceLogs"), where("date", ">=", since)),
+    (snap) => {
+      practiceLogs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      rerender();
+    }
+  ));
+
+  // videos (直近60件)
+  unsubscribers.push(onSnapshot(
+    query(collection(db, "videos"), orderBy("createdAt", "desc"), limit(60)),
+    (snap) => {
+      videos = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      rerender();
+    }
+  ));
+
+  els.searchInput.value = local.query;
+  ensureDailyFocus();
+  rerender();
 }
 
-function renderDailyMessage() {
-  const seed = hashText(todayKey());
-  els.dailyMessage.textContent = dailyMessages[seed % dailyMessages.length];
-}
+// ───── 派生データ算出 ─────
 
-function hashText(text) {
-  return String(text).split("").reduce((hash, char) => ((hash << 5) - hash + char.charCodeAt(0)) >>> 0, 2166136261);
-}
-
-function seededShuffle(items, seedText) {
-  const shuffled = [...items];
-  let seed = hashText(seedText) || 1;
-  for (let i = shuffled.length - 1; i > 0; i -= 1) {
-    seed = (seed * 1664525 + 1013904223) >>> 0;
-    const j = seed % (i + 1);
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-  return shuffled;
-}
-
-function uniqueById(items) {
-  const seen = new Set();
-  return items.filter((item) => {
-    if (!item || seen.has(item.id)) return false;
-    seen.add(item.id);
-    return true;
-  });
-}
-
-function findTrick(id) {
-  return tricks.find((trick) => trick.id === id);
-}
-
-function isIntermediateOrBelow(trick) {
-  return trick.level === "初級" || trick.level === "中級";
-}
+function findTrick(id) { return tricks.find((t) => t.id === id); }
 
 function targetParts(trick) {
+  if (trick.targetCount && trick.targetUnit) {
+    return { total: Math.max(Number(trick.targetCount) || 1, 1), unit: trick.targetUnit };
+  }
   const match = String(trick.target || "1回").match(/(\d+)/);
   const total = match ? Number(match[1]) : 1;
   const unit = String(trick.target || "1回").replace(/\d+/g, "") || "回";
   return { total: Math.max(total, 1), unit };
 }
 
+function todayProgressMap() {
+  const today = todayKey();
+  const map = {};
+  practiceLogs.filter((log) => log.date === today).forEach((log) => {
+    const cur = map[log.trickId] || { count: 0, landed: false, goalCleared: false };
+    cur.count += Number(log.count || 0);
+    cur.landed = cur.landed || Boolean(log.landed);
+    cur.goalCleared = cur.goalCleared || Boolean(log.goalCleared);
+    map[log.trickId] = cur;
+  });
+  // goalClearedはtargetに対する達成で再判定
+  Object.entries(map).forEach(([trickId, p]) => {
+    const t = findTrick(trickId);
+    if (!t) return;
+    const { total } = targetParts(t);
+    p.goalCleared = p.goalCleared || p.count >= total;
+  });
+  return map;
+}
+
 function progressFor(id) {
-  const progress = state.todayProgress[id] || {};
+  const p = todayProgressMap()[id] || {};
   return {
-    count: Number(progress.count || 0),
-    landed: Boolean(progress.landed),
-    goalCleared: Boolean(progress.goalCleared),
+    count: Number(p.count || 0),
+    landed: Boolean(p.landed),
+    goalCleared: Boolean(p.goalCleared),
   };
 }
 
-function ensureDailyFocus() {
-  if (state.dailyFocus.date === todayKey() && state.dailyFocus.ids.length) return;
-
-  const landedIds = Object.keys(state.allTimeDone);
-  const landed = seededShuffle(landedIds.map(findTrick).filter(Boolean), `${todayKey()}-landed`).slice(0, 3);
-  const unlandedIntermediate = seededShuffle(
-    tricks.filter((trick) => isIntermediateOrBelow(trick) && !state.allTimeDone[trick.id]),
-    `${todayKey()}-new`
-  ).slice(0, 2);
-  const fallback = seededShuffle(
-    tricks.filter(isIntermediateOrBelow),
-    `${todayKey()}-fallback`
-  );
-  const selected = uniqueById([...landed, ...unlandedIntermediate, ...fallback]).slice(0, 5);
-
-  state.dailyFocus = { date: todayKey(), ids: selected.map((trick) => trick.id) };
-  saveState();
-}
-
-function focusTricks() {
-  ensureDailyFocus();
-  return state.dailyFocus.ids.map(findTrick).filter(Boolean);
-}
-
-function unique(values) {
-  return ["すべて", ...Array.from(new Set(values.filter(Boolean)))];
-}
-
-function normalizeKind(kind) {
-  return String(kind).replace(/[\/・\s]/g, "");
-}
-
-function makeChip(label, key) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = `chip${state[key] === label ? " active" : ""}`;
-  button.textContent = label;
-  button.addEventListener("click", () => {
-    state[key] = label;
-    saveState();
-    render();
+function allTimeMap() {
+  // 全期間（=取得範囲60日）で日次集計→技ごとの統計
+  const byDate = {}; // {date: {trickId: count}}
+  practiceLogs.forEach((log) => {
+    byDate[log.date] = byDate[log.date] || {};
+    byDate[log.date][log.trickId] = (byDate[log.date][log.trickId] || 0) + Number(log.count || 0);
   });
-  return button;
+  const out = {}; // {trickId: {firstLandedDate, bestCount, goalCleared, firstGoalClearedDate, lastLandedDate}}
+  const dates = Object.keys(byDate).sort();
+  for (const date of dates) {
+    for (const [trickId, cnt] of Object.entries(byDate[date])) {
+      const t = findTrick(trickId);
+      if (!t) continue;
+      const { total } = targetParts(t);
+      const cleared = cnt >= total;
+      const cur = out[trickId] || {
+        firstLandedDate: date,
+        bestCount: 0,
+        goalCleared: false,
+        firstGoalClearedDate: null,
+        lastLandedDate: date,
+      };
+      cur.bestCount = Math.max(cur.bestCount, cnt);
+      if (cleared && !cur.firstGoalClearedDate) cur.firstGoalClearedDate = date;
+      cur.goalCleared = cur.goalCleared || cleared;
+      cur.lastLandedDate = date;
+      out[trickId] = cur;
+    }
+  }
+  return out;
 }
 
-function renderChips() {
-  els.kindChips.replaceChildren(...unique(tricks.map((trick) => trick.kind)).map((value) => makeChip(value, "kind")));
-  els.levelChips.replaceChildren(...unique(tricks.map((trick) => trick.level)).map((value) => makeChip(value, "level")));
-}
+// ───── アクション ─────
 
-function filteredTricks() {
-  const query = state.query.trim().toLowerCase();
-  return tricks.filter((trick) => {
-    const haystack = `${trick.name} ${trick.kind} ${trick.level} ${trick.memo}`.toLowerCase();
-    return (!query || haystack.includes(query))
-      && (state.kind === "すべて" || trick.kind === state.kind)
-      && (state.level === "すべて" || trick.level === state.level);
-  });
-}
-
-function todayLandedTricks() {
-  return Object.entries(state.todayProgress)
-    .filter(([, progress]) => progress.landed)
-    .map(([id]) => findTrick(id))
-    .filter(Boolean);
-}
-
-function todayGoalClearedIds() {
-  return Object.entries(state.todayProgress)
-    .filter(([, progress]) => progress.goalCleared)
-    .map(([id]) => id);
-}
-
-function addLanded(trick, card) {
+async function addLanded(trick, card) {
+  if (!currentUser) return;
   const { total } = targetParts(trick);
-  const previous = progressFor(trick.id);
-  const count = Math.min(previous.count + 1, total);
-  const goalCleared = count >= total;
+  const before = progressFor(trick.id);
+  const newCount = Math.min(before.count + 1, total);
+  const goalCleared = newCount >= total;
 
-  state.todayProgress[trick.id] = {
-    count,
-    target: total,
-    landed: true,
-    goalCleared,
-    updatedAt: new Date().toISOString(),
-  };
-
-  const allTime = state.allTimeDone[trick.id] || {
-    firstLandedDate: todayKey(),
-    bestCount: 0,
-    goalCleared: false,
-    firstGoalClearedDate: null,
-  };
-  allTime.bestCount = Math.max(Number(allTime.bestCount || 0), count);
-  allTime.goalCleared = Boolean(allTime.goalCleared || goalCleared);
-  allTime.firstGoalClearedDate = allTime.firstGoalClearedDate || (goalCleared ? todayKey() : null);
-  allTime.lastLandedDate = todayKey();
-  state.allTimeDone[trick.id] = allTime;
-
-  saveState();
-  if (goalCleared) {
-    card.classList.add("done-pop");
-    setTimeout(render, 180);
-  } else {
-    render();
+  try {
+    await addDoc(collection(db, "practiceLogs"), {
+      userId: currentUser.uid,
+      userEmail: currentUser.email,
+      trickId: trick.id,
+      trickName: trick.name,
+      date: todayKey(),
+      count: 1,
+      landed: true,
+      goalCleared,
+      createdAt: serverTimestamp(),
+    });
+    if (goalCleared && !before.goalCleared) {
+      card.classList.add("done-pop");
+      setTimeout(() => card.classList.remove("done-pop"), 400);
+    }
+  } catch (e) {
+    alert("記録できませんでした: " + e.message);
   }
 }
 
-function undoToday(id) {
-  delete state.todayProgress[id];
-  saveState();
-  render();
+async function undoToday(trickId) {
+  if (!currentUser) return;
+  const today = todayKey();
+  const targets = practiceLogs
+    .filter((log) => log.date === today && log.trickId === trickId)
+    .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+  const last = targets[0];
+  if (!last) return;
+  try {
+    await deleteDoc(doc(db, "practiceLogs", last.id));
+  } catch (e) {
+    alert("もどせませんでした: " + e.message);
+  }
 }
 
 function toggleSaved(id) {
-  state.saved = state.saved.includes(id)
-    ? state.saved.filter((savedId) => savedId !== id)
-    : [...state.saved, id];
-  saveState();
-  render();
+  local.saved = local.saved.includes(id)
+    ? local.saved.filter((x) => x !== id)
+    : [...local.saved, id];
+  saveLocal();
+  rerender();
 }
 
-function togglePinned(id) {
-  state.pinnedToday = state.pinnedToday.includes(id)
-    ? state.pinnedToday.filter((pinnedId) => pinnedId !== id)
-    : [...state.pinnedToday, id];
-  saveState();
-  render();
-}
-
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      const result = String(reader.result || "");
-      resolve(result.includes(",") ? result.split(",")[1] : result);
+async function togglePinned(id) {
+  const cur = pinnedTodayDoc.trickIds || [];
+  const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+  try {
+    await setDoc(doc(db, "pinnedToday", todayKey()), {
+      trickIds: next,
+      selectedBy: currentUser.uid,
+      updatedAt: serverTimestamp(),
     });
-    reader.addEventListener("error", () => reject(reader.error || new Error("動画を読み込めませんでした")));
-    reader.readAsDataURL(file);
-  });
+  } catch (e) {
+    alert("ピン留め変更に失敗: " + e.message);
+  }
 }
+
+async function clearPinned() {
+  try {
+    await setDoc(doc(db, "pinnedToday", todayKey()), {
+      trickIds: [],
+      selectedBy: currentUser.uid,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (e) {
+    alert("クリアに失敗: " + e.message);
+  }
+}
+
+// ───── 動画アップロード ─────
 
 function pickVideoFile() {
   return new Promise((resolve) => {
@@ -372,241 +391,167 @@ function pickVideoFile() {
   });
 }
 
-function rememberVideoUpload(record) {
-  state.videoUploads = [
-    { ...(state.videoUploads || []).find((item) => item.localId === record.localId), ...record },
-    ...(state.videoUploads || []).filter((item) => item.localId !== record.localId),
-  ].slice(0, 80);
-  saveState();
-}
-
-function jsonpRequest(endpoint, params) {
-  return new Promise((resolve, reject) => {
-    const callbackName = `skateJsonp_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
-    const script = document.createElement("script");
-    const url = new URL(endpoint);
-    Object.entries({ ...params, callback: callbackName }).forEach(([key, value]) => {
-      url.searchParams.set(key, value == null ? "" : value);
-    });
-    const cleanup = () => {
-      delete window[callbackName];
-      script.remove();
-    };
-    const timer = window.setTimeout(() => {
-      cleanup();
-      reject(new Error("保存結果を確認できませんでした"));
-    }, 15000);
-    window[callbackName] = (data) => {
-      window.clearTimeout(timer);
-      cleanup();
-      resolve(data);
-    };
-    script.addEventListener("error", () => {
-      window.clearTimeout(timer);
-      cleanup();
-      reject(new Error("保存結果の取得に失敗しました"));
-    });
-    script.src = url.toString();
-    document.body.append(script);
-  });
-}
-
-async function refreshVideoUpload(localId) {
-  const endpoint = (state.uploadSettings.endpoint || "").trim();
-  if (!endpoint || !localId) return null;
-  rememberVideoUpload({
-    localId,
-    status: "checking",
-    lastCheckMessage: "保存結果を確認中です。",
-    lastCheckedAt: new Date().toISOString(),
-  });
-  renderGrowth();
-  try {
-    const result = await jsonpRequest(endpoint, {
-      action: "videoStatus",
-      token: state.uploadSettings.token || "",
-      localId,
-    });
-    if (result?.ok && result.video) {
-      rememberVideoUpload({
-        localId,
-        status: "saved",
-        driveUrl: result.video.driveUrl,
-        driveFileId: result.video.driveFileId,
-        spreadsheetUrl: result.spreadsheetUrl || "",
-        savedAt: result.video.recordedAt || new Date().toISOString(),
-        lastCheckMessage: "Drive保存を確認しました。",
-        lastCheckedAt: new Date().toISOString(),
-      });
-      renderGrowth();
-      return result;
-    }
-    rememberVideoUpload({
-      localId,
-      status: result?.error === "invalid token" ? "failed" : "sent",
-      lastCheckMessage: result?.error === "invalid token"
-        ? "合言葉が一致していません。"
-        : "まだDrive保存が見つかりません。",
-      lastCheckedAt: new Date().toISOString(),
-    });
-    renderGrowth();
-    return result;
-  } catch (error) {
-    rememberVideoUpload({
-      localId,
-      status: "failed",
-      lastCheckMessage: error.message,
-      lastCheckedAt: new Date().toISOString(),
-    });
-    renderGrowth();
-    return { ok: false, error: error.message };
-  }
-}
-
-async function refreshPendingVideos() {
-  const pending = (state.videoUploads || [])
-    .filter((item) => item.status === "sent" && !item.driveUrl)
-    .slice(0, 5);
-  for (const item of pending) {
-    try {
-      await refreshVideoUpload(item.localId);
-    } catch {
-      // 次回表示時にもう一度確認します。
-    }
-  }
-}
-
 async function uploadPracticeVideo(trick, button) {
-  const endpoint = (state.uploadSettings.endpoint || "").trim();
-  if (location.protocol === "file:") {
-    button.textContent = "GitHub版で";
-    els.uploadSettingsStatus.textContent = "動画保存はfile直開きではなく、GitHub Pages版かlocalhost版で試してください。";
-    window.setTimeout(() => { button.textContent = "動画を撮る"; }, 2200);
-    return;
-  }
-  if (!endpoint) {
-    button.textContent = "親設定でURL";
-    window.setTimeout(() => { button.textContent = "動画を撮る"; }, 1800);
-    return;
-  }
-
+  if (!currentUser) return;
   const file = await pickVideoFile();
   if (!file) return;
   if (file.size > MAX_VIDEO_BYTES) {
     button.textContent = "大きすぎる";
-    window.setTimeout(() => { button.textContent = "動画を撮る"; }, 1800);
+    setTimeout(() => { button.textContent = "動画を撮る"; }, 1800);
     return;
   }
 
-  const progress = progressFor(trick.id);
-  const { total, unit } = targetParts(trick);
-  const localId = `${Date.now()}-${trick.id}`;
+  const ext = (file.name.split(".").pop() || "mp4").toLowerCase().slice(0, 6);
+  const videoId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const path = `videos/${currentUser.uid}/${videoId}.${ext}`;
+  const ref = storageRef(storage, path);
+  const task = uploadBytesResumable(ref, file, { contentType: file.type || "video/mp4" });
+
   button.disabled = true;
-  button.textContent = "保存中";
+  button.textContent = "送信中";
+  els.uploadProgress.hidden = false;
+  els.uploadProgressLabel.textContent = `${trick.name}: 0%`;
+  els.uploadProgressBar.style.width = "0%";
 
-  try {
-    const base64 = await fileToBase64(file);
-    const payload = {
-      token: state.uploadSettings.token || "",
-      app: "Soichiro's Daily Life",
-      kind: "practiceVideo",
-      localId,
-      date: todayKey(),
-      capturedAt: new Date().toISOString(),
-      trickId: trick.id,
-      trickNo: trick.no,
-      trickName: trick.name,
-      trickKind: trick.kind,
-      trickLevel: trick.level,
-      count: progress.count,
-      target: total,
-      unit,
-      landed: progress.landed,
-      goalCleared: progress.goalCleared,
-      fileName: file.name || `${todayKey()}_${trick.name}.mp4`,
-      mimeType: file.type || "video/mp4",
-      fileSize: file.size,
-      base64,
-    };
-
-    await fetch(endpoint, {
-      method: "POST",
-      mode: "no-cors",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(payload),
-    });
-
-    rememberVideoUpload({
-      localId,
-      date: todayKey(),
-      trickId: trick.id,
-      trickName: trick.name,
-      fileName: payload.fileName,
-      fileSize: file.size,
-      status: "sent",
-      uploadedAt: new Date().toISOString(),
-    });
-    button.textContent = "保存した";
-    renderGrowth();
-    window.setTimeout(() => refreshVideoUpload(localId), 1800);
-  } catch (error) {
-    rememberVideoUpload({
-      localId,
-      date: todayKey(),
-      trickId: trick.id,
-      trickName: trick.name,
-      fileName: file.name || "",
-      fileSize: file.size,
-      status: "failed",
-      error: error.message,
-      uploadedAt: new Date().toISOString(),
-    });
-    button.textContent = "失敗";
-  } finally {
-    window.setTimeout(() => {
+  task.on("state_changed",
+    (snap) => {
+      const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
+      els.uploadProgressBar.style.width = `${pct}%`;
+      els.uploadProgressLabel.textContent = `${trick.name}: ${pct}%`;
+      button.textContent = `${pct}%`;
+    },
+    (error) => {
       button.disabled = false;
-      button.textContent = "動画を撮る";
-    }, 1600);
-  }
+      button.textContent = "失敗";
+      els.uploadProgressLabel.textContent = `失敗: ${error.message}`;
+      setTimeout(() => {
+        button.textContent = "動画を撮る";
+        els.uploadProgress.hidden = true;
+      }, 2400);
+    },
+    async () => {
+      try {
+        const url = await getDownloadURL(task.snapshot.ref);
+        await addDoc(collection(db, "videos"), {
+          userId: currentUser.uid,
+          userEmail: currentUser.email,
+          trickId: trick.id,
+          trickName: trick.name,
+          date: todayKey(),
+          fileName: file.name || `${todayKey()}_${trick.name}.${ext}`,
+          fileSize: file.size,
+          mimeType: file.type || "video/mp4",
+          storagePath: path,
+          downloadUrl: url,
+          createdAt: serverTimestamp(),
+        });
+        button.textContent = "保存した";
+        els.uploadProgressLabel.textContent = `${trick.name}: 完了`;
+      } catch (e) {
+        button.textContent = "保存失敗";
+        els.uploadProgressLabel.textContent = `メタ保存失敗: ${e.message}`;
+      } finally {
+        setTimeout(() => {
+          button.disabled = false;
+          button.textContent = "動画を撮る";
+          els.uploadProgress.hidden = true;
+        }, 2000);
+      }
+    }
+  );
 }
 
-async function testUploadConnection() {
-  const endpoint = els.uploadEndpointInput.value.trim();
-  const token = els.uploadTokenInput.value.trim();
-  state.uploadSettings = { endpoint, token };
-  saveState();
+// ───── 表示計算 ─────
 
-  if (location.protocol === "file:") {
-    els.uploadSettingsStatus.textContent = "file直開きでは接続テストできません。GitHub Pages版かlocalhost版で開いてください。";
+function hashText(text) {
+  return String(text).split("").reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) >>> 0, 2166136261);
+}
+
+function seededShuffle(items, seedText) {
+  const out = [...items];
+  let seed = hashText(seedText) || 1;
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    const j = seed % (i + 1);
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+function uniqueById(items) {
+  const seen = new Set();
+  return items.filter((it) => it && !seen.has(it.id) && seen.add(it.id));
+}
+
+function isIntermediateOrBelow(t) { return t.level === "初級" || t.level === "中級"; }
+
+function ensureDailyFocus() {
+  // Today's 5: settingsDoc.todays5 が設定されていればそれを優先、なければ動的選定
+  const today = todayKey();
+  if (settingsDoc.todays5 && settingsDoc.todays5.length === 5) {
+    local.dailyFocus = { date: today, ids: settingsDoc.todays5 };
     return;
   }
-  if (!endpoint || !token) {
-    els.uploadSettingsStatus.textContent = "URLと合言葉を入れてから接続テストしてください。";
-    return;
-  }
+  if (local.dailyFocus.date === today && local.dailyFocus.ids.length) return;
+  const all = allTimeMap();
+  const landedIds = Object.keys(all);
+  const landed = seededShuffle(landedIds.map(findTrick).filter(Boolean), `${today}-l`).slice(0, 3);
+  const unlanded = seededShuffle(
+    tricks.filter((t) => isIntermediateOrBelow(t) && !all[t.id]),
+    `${today}-n`
+  ).slice(0, 2);
+  const fb = seededShuffle(tricks.filter(isIntermediateOrBelow), `${today}-f`);
+  const selected = uniqueById([...landed, ...unlanded, ...fb]).slice(0, 5);
+  local.dailyFocus = { date: today, ids: selected.map((t) => t.id) };
+  saveLocal();
+}
 
-  els.testUploadSettingsButton.disabled = true;
-  els.testUploadSettingsButton.textContent = "確認中";
-  els.uploadSettingsStatus.textContent = "Apps Scriptに接続しています...";
-  try {
-    const result = await jsonpRequest(endpoint, {
-      action: "recentVideos",
-      token,
-      limit: 1,
-    });
-    if (result?.ok) {
-      els.uploadSettingsStatus.textContent = `接続OKです。スプレッドシート: ${result.spreadsheetUrl || "確認できました"}`;
-    } else if (result?.error === "invalid token") {
-      els.uploadSettingsStatus.textContent = "合言葉が一致していません。Apps ScriptのCONFIG.TOKENと同じ文字を入れてください。";
-    } else {
-      els.uploadSettingsStatus.textContent = `接続はできましたがエラーです: ${result?.error || "不明なエラー"}`;
-    }
-  } catch (error) {
-    els.uploadSettingsStatus.textContent = `接続できませんでした: ${error.message}`;
-  } finally {
-    els.testUploadSettingsButton.disabled = false;
-    els.testUploadSettingsButton.textContent = "接続テスト";
-  }
+function focusTricks() {
+  ensureDailyFocus();
+  return local.dailyFocus.ids.map(findTrick).filter(Boolean);
+}
+
+function normalizeKind(kind) { return String(kind).replace(/[\/・\s]/g, ""); }
+
+function unique(values) { return ["すべて", ...Array.from(new Set(values.filter(Boolean)))]; }
+
+function makeChip(label, key) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `chip${local[key] === label ? " active" : ""}`;
+  button.textContent = label;
+  button.addEventListener("click", () => { local[key] = label; saveLocal(); rerender(); });
+  return button;
+}
+
+function renderChips() {
+  els.kindChips.replaceChildren(...unique(tricks.map((t) => t.kind)).map((v) => makeChip(v, "kind")));
+  els.levelChips.replaceChildren(...unique(tricks.map((t) => t.level)).map((v) => makeChip(v, "level")));
+}
+
+function filteredTricks() {
+  const q = local.query.trim().toLowerCase();
+  return tricks.filter((t) => {
+    const hay = `${t.name} ${t.kind} ${t.level} ${t.memo}`.toLowerCase();
+    return (!q || hay.includes(q))
+      && (local.kind === "すべて" || t.kind === local.kind)
+      && (local.level === "すべて" || t.level === local.level);
+  });
+}
+
+function todayLandedTricks() {
+  const map = todayProgressMap();
+  return Object.entries(map).filter(([, p]) => p.landed).map(([id]) => findTrick(id)).filter(Boolean);
+}
+
+function todayGoalClearedIds() {
+  const map = todayProgressMap();
+  return Object.entries(map).filter(([, p]) => p.goalCleared).map(([id]) => id);
+}
+
+function renderDailyMessage() {
+  const seed = hashText(todayKey());
+  els.dailyMessage.textContent = dailyMessages[seed % dailyMessages.length];
 }
 
 function renderCard(trick, options = {}) {
@@ -625,13 +570,12 @@ function renderCard(trick, options = {}) {
   const memo = fragment.querySelector(".memo");
   memo.textContent = progress.goalCleared ? "目標クリア！" : trick.memo || defaultMemo;
   const video = fragment.querySelector(".video-button");
-  video.href = trick.video;
+  video.href = trick.videoSearchUrl || trick.video || "#";
   const save = fragment.querySelector(".save-button");
-  const saved = state.saved.includes(trick.id);
+  const saved = local.saved.includes(trick.id);
   save.textContent = saved ? "★" : "☆";
   save.classList.toggle("active", saved);
   save.addEventListener("click", () => toggleSaved(trick.id));
-
   const doneButton = fragment.querySelector(".done-button");
   doneButton.textContent = progress.goalCleared ? "クリア済み" : "+ できた";
   doneButton.disabled = progress.goalCleared;
@@ -644,10 +588,7 @@ function renderCard(trick, options = {}) {
 function renderDoneList() {
   const done = todayLandedTricks();
   els.donePanelCount.textContent = done.length;
-  if (!done.length) {
-    els.doneList.replaceChildren();
-    return;
-  }
+  if (!done.length) { els.doneList.replaceChildren(); return; }
   els.doneList.replaceChildren(...done.map((trick) => {
     const progress = progressFor(trick.id);
     const { total, unit } = targetParts(trick);
@@ -671,10 +612,10 @@ function makeRoutineCard(items, index) {
   const title = document.createElement("h3");
   title.textContent = `ルーティン ${index + 1}`;
   const list = document.createElement("ol");
-  items.forEach((trick) => {
-    const item = document.createElement("li");
-    item.textContent = trick.name;
-    list.append(item);
+  items.forEach((t) => {
+    const li = document.createElement("li");
+    li.textContent = t.name;
+    list.append(li);
   });
   card.append(title, list);
   return card;
@@ -683,100 +624,41 @@ function makeRoutineCard(items, index) {
 function renderRoutines() {
   const source = focusTricks();
   const routines = [0, 1, 2].map((offset) => {
-    const shuffled = seededShuffle(source, `${todayKey()}-routine-${offset}`);
+    const shuffled = seededShuffle(source, `${todayKey()}-r-${offset}`);
     return shuffled.slice(0, offset === 0 ? 2 : 3);
   });
   els.routineList.replaceChildren(...routines.map(makeRoutineCard));
 }
 
-function visibleHomeIds() {
-  return new Set([
-    ...state.dailyFocus.ids,
-    ...state.pinnedToday,
-  ]);
-}
-
-function nextChallengePool() {
-  const excluded = visibleHomeIds();
-  if (state.nextChallenge?.date === todayKey() && state.nextChallenge.id) {
-    excluded.add(state.nextChallenge.id);
-  }
-  const unseen = tricks.filter((trick) => !excluded.has(trick.id));
-  return unseen.length ? unseen : tricks;
-}
-
-function renderNextChallenge() {
-  let current = state.nextChallenge?.date === todayKey()
-    ? findTrick(state.nextChallenge.id)
-    : null;
-  if (current && visibleHomeIds().has(current.id)) {
-    state.nextChallenge = null;
-    saveState();
-    current = null;
-  }
-  els.nextHelp.hidden = Boolean(current);
-  els.gachaMachine.classList.toggle("result-ready", Boolean(current));
-  els.nextChallengeResult.replaceChildren(
-    current ? renderCard(current, { compact: true }) : document.createTextNode("")
-  );
-}
-
-function drawNextChallenge() {
-  const pool = nextChallengePool();
-  if (!pool.length) return;
-  const selected = pool[Math.floor(Math.random() * pool.length)];
-  state.nextChallenge = {
-    id: selected.id,
-    date: todayKey(),
-    drawnAt: new Date().toISOString(),
-  };
-  saveState();
-
-  els.gachaBall.classList.remove("rolling");
-  els.gachaMachine.classList.remove("result-ready");
-  els.gachaMachine.classList.add("is-spinning");
-  els.nextChallengeResult.classList.add("drawing");
-  els.nextChallengeResult.replaceChildren();
-  window.requestAnimationFrame(() => {
-    els.gachaBall.classList.add("rolling");
-    window.setTimeout(() => {
-      renderNextChallenge();
-      els.nextChallengeResult.classList.remove("drawing");
-      els.gachaMachine.classList.remove("is-spinning");
-    }, 960);
-  });
-}
-
 function renderLibrary() {
-  const landedIds = Object.keys(state.allTimeDone);
-  const goalIds = landedIds.filter((id) => state.allTimeDone[id]?.goalCleared);
+  const allTime = allTimeMap();
+  const landedIds = Object.keys(allTime);
+  const goalIds = landedIds.filter((id) => allTime[id].goalCleared);
   els.librarySummary.textContent = `${landedIds.length}/${tricks.length}`;
   els.landedCount.textContent = landedIds.length;
   els.goalClearedCount.textContent = goalIds.length;
 
   const rows = tricks.map((trick) => {
-    const record = state.allTimeDone[trick.id];
-    const videos = (state.videoUploads || []).filter((item) => item.trickId === trick.id && item.driveUrl);
-    const latestVideo = videos[0];
+    const record = allTime[trick.id];
+    const trickVideos = videos.filter((v) => v.trickId === trick.id);
+    const latestVideo = trickVideos[0];
     const row = document.createElement("div");
     row.className = `library-item${record ? " collected" : ""}`;
     const name = document.createElement("strong");
     name.textContent = `${trick.no}. ${trick.name}`;
     const meta = document.createElement("span");
-    meta.textContent = record
-      ? [
-        record.goalCleared ? "目標クリア" : "1回以上できた",
-        `初達成 ${record.firstLandedDate || "-"}`,
-        record.firstGoalClearedDate ? `目標達成 ${record.firstGoalClearedDate}` : null,
-        `最高 ${record.bestCount || 1}${targetParts(trick).unit}`,
-        videos.length ? `動画 ${videos.length}本` : null
-      ].filter(Boolean).join(" / ")
-      : `${trick.kind} / ${trick.level}`;
+    meta.textContent = record ? [
+      record.goalCleared ? "目標クリア" : "1回以上できた",
+      `初達成 ${record.firstLandedDate || "-"}`,
+      record.firstGoalClearedDate ? `目標達成 ${record.firstGoalClearedDate}` : null,
+      `最高 ${record.bestCount || 1}${targetParts(trick).unit}`,
+      trickVideos.length ? `動画 ${trickVideos.length}本` : null,
+    ].filter(Boolean).join(" / ") : `${trick.kind} / ${trick.level}`;
     row.append(name, meta);
-    if (latestVideo) {
+    if (latestVideo?.downloadUrl) {
       const link = document.createElement("a");
       link.className = "library-video-link";
-      link.href = latestVideo.driveUrl;
+      link.href = latestVideo.downloadUrl;
       link.target = "_blank";
       link.rel = "noreferrer";
       link.textContent = "動画";
@@ -787,76 +669,65 @@ function renderLibrary() {
   els.libraryList.replaceChildren(...rows);
 }
 
-function practiceRecords() {
-  const records = [];
-  const addRecords = (date, progressById = {}) => {
-    Object.entries(progressById || {}).forEach(([id, progress]) => {
-      const trick = findTrick(id);
-      const count = Number(progress?.count || 0);
-      if (!trick || count <= 0) return;
-      const { total } = targetParts(trick);
-      records.push({
-        date,
-        id,
-        trick,
-        count,
-        target: Number(progress?.target || total),
-        landed: Boolean(progress?.landed),
-        goalCleared: Boolean(progress?.goalCleared),
-      });
+function practiceRecordsForGrowth() {
+  const out = [];
+  const byDate = {};
+  practiceLogs.forEach((log) => {
+    const k = `${log.date}|${log.trickId}`;
+    byDate[k] = byDate[k] || { date: log.date, trickId: log.trickId, count: 0, landed: false, goalCleared: false };
+    byDate[k].count += Number(log.count || 0);
+    byDate[k].landed = byDate[k].landed || Boolean(log.landed);
+  });
+  Object.values(byDate).forEach((row) => {
+    const trick = findTrick(row.trickId);
+    if (!trick || row.count <= 0) return;
+    const { total } = targetParts(trick);
+    out.push({
+      date: row.date,
+      id: row.trickId,
+      trick,
+      count: row.count,
+      target: total,
+      landed: row.landed,
+      goalCleared: row.count >= total,
     });
-  };
-  Object.entries(state.history || {}).forEach(([date, progressById]) => addRecords(date, progressById));
-  addRecords(todayKey(), state.todayProgress);
-  return records;
+  });
+  return out;
 }
 
 function summarizeByTrick(records) {
-  const byTrick = new Map();
-  records.forEach((record) => {
-    const current = byTrick.get(record.id) || {
-      trick: record.trick,
-      totalCount: 0,
-      bestCount: 0,
-      practicedDays: new Set(),
-      goalCleared: false,
-      lastDate: record.date,
-    };
-    current.totalCount += record.count;
-    current.bestCount = Math.max(current.bestCount, record.count);
-    current.practicedDays.add(record.date);
-    current.goalCleared = current.goalCleared || record.goalCleared;
-    current.lastDate = current.lastDate > record.date ? current.lastDate : record.date;
-    byTrick.set(record.id, current);
+  const m = new Map();
+  records.forEach((r) => {
+    const c = m.get(r.id) || { trick: r.trick, totalCount: 0, bestCount: 0, practicedDays: new Set(), goalCleared: false, lastDate: r.date };
+    c.totalCount += r.count;
+    c.bestCount = Math.max(c.bestCount, r.count);
+    c.practicedDays.add(r.date);
+    c.goalCleared = c.goalCleared || r.goalCleared;
+    c.lastDate = c.lastDate > r.date ? c.lastDate : r.date;
+    m.set(r.id, c);
   });
-  return Array.from(byTrick.values());
+  return Array.from(m.values());
 }
 
 function summarizeByKind(records) {
-  const byKind = new Map();
-  records.forEach((record) => {
-    const kind = record.trick.kind || "その他";
-    const current = byKind.get(kind) || {
-      kind,
-      totalCount: 0,
-      practicedDays: new Set(),
-      trickIds: new Set(),
-      goalClearCount: 0,
-    };
-    current.totalCount += record.count;
-    current.practicedDays.add(record.date);
-    current.trickIds.add(record.id);
-    if (record.goalCleared) current.goalClearCount += 1;
-    byKind.set(kind, current);
+  const m = new Map();
+  records.forEach((r) => {
+    const kind = r.trick.kind || "その他";
+    const c = m.get(kind) || { kind, totalCount: 0, practicedDays: new Set(), trickIds: new Set(), goalClearCount: 0 };
+    c.totalCount += r.count;
+    c.practicedDays.add(r.date);
+    c.trickIds.add(r.id);
+    if (r.goalCleared) c.goalClearCount += 1;
+    m.set(kind, c);
   });
-  return Array.from(byKind.values());
+  return Array.from(m.values());
 }
 
 function emptyInsight(text) {
-  const item = document.createElement("p");
-  item.className = "empty-insight";
-  item.textContent = text;
-  return item;
+  const p = document.createElement("p");
+  p.className = "empty-insight";
+  p.textContent = text;
+  return p;
 }
 
 function makeInsightItem(title, meta, value = "") {
@@ -878,42 +749,23 @@ function makeInsightItem(title, meta, value = "") {
   return item;
 }
 
-function videoStatusLabel(item) {
-  if (item.driveUrl || item.status === "saved") return "保存済み";
-  if (item.status === "checking") return "確認中";
-  if (item.status === "failed") return "失敗";
-  return "未保存";
-}
-
-function makeVideoInsightItem(item) {
+function makeVideoInsightItem(v) {
   const row = makeInsightItem(
-    item.trickName || "動画",
+    v.trickName || "動画",
     [
-      item.date || "-",
-      `${Math.round((Number(item.fileSize || 0) / 1024 / 1024) * 10) / 10}MB`,
-      item.lastCheckMessage || null
-    ].filter(Boolean).join(" / "),
-    videoStatusLabel(item)
+      v.date || "-",
+      `${Math.round((Number(v.fileSize || 0) / 1024 / 1024) * 10) / 10}MB`,
+    ].join(" / "),
+    "保存済み"
   );
-  if (item.driveUrl) {
+  if (v.downloadUrl) {
     const link = document.createElement("a");
     link.className = "insight-link";
-    link.href = item.driveUrl;
+    link.href = v.downloadUrl;
     link.target = "_blank";
     link.rel = "noreferrer";
     link.textContent = "見る";
     row.append(link);
-  } else if (item.status !== "checking") {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "insight-link";
-    button.textContent = item.status === "failed" ? "再確認" : "確認";
-    button.addEventListener("click", async () => {
-      button.disabled = true;
-      button.textContent = "確認中";
-      await refreshVideoUpload(item.localId);
-    });
-    row.append(button);
   }
   return row;
 }
@@ -923,9 +775,9 @@ function renderInsightList(container, items, emptyText) {
 }
 
 function renderGrowth() {
-  const records = practiceRecords();
-  const practiceDays = new Set(records.map((record) => record.date));
-  const totalCount = records.reduce((sum, record) => sum + record.count, 0);
+  const records = practiceRecordsForGrowth();
+  const practiceDays = new Set(records.map((r) => r.date));
+  const totalCount = records.reduce((s, r) => s + r.count, 0);
   const trickStats = summarizeByTrick(records);
   const kindStats = summarizeByKind(records);
 
@@ -943,52 +795,35 @@ function renderGrowth() {
   els.stretchKind.textContent = stretchKind?.kind || "-";
 
   const weaponItems = trickStats
-    .filter((item) => item.goalCleared || item.bestCount >= Math.max(2, Math.ceil(targetParts(item.trick).total * .6)))
+    .filter((it) => it.goalCleared || it.bestCount >= Math.max(2, Math.ceil(targetParts(it.trick).total * .6)))
     .sort((a, b) => (Number(b.goalCleared) - Number(a.goalCleared)) || b.bestCount - a.bestCount || b.totalCount - a.totalCount)
     .slice(0, 4)
-    .map((item) => makeInsightItem(
-      item.trick.name,
-      `${item.trick.kind} / 最高 ${item.bestCount}${targetParts(item.trick).unit} / ${item.practicedDays.size}日`,
-      item.goalCleared ? "クリア" : "成長中"
-    ));
+    .map((it) => makeInsightItem(it.trick.name, `${it.trick.kind} / 最高 ${it.bestCount}${targetParts(it.trick).unit} / ${it.practicedDays.size}日`, it.goalCleared ? "クリア" : "成長中"));
 
   const almostItems = trickStats
-    .filter((item) => !item.goalCleared)
-    .map((item) => ({ ...item, target: targetParts(item.trick).total, unit: targetParts(item.trick).unit }))
-    .filter((item) => item.bestCount > 0)
+    .filter((it) => !it.goalCleared)
+    .map((it) => ({ ...it, target: targetParts(it.trick).total, unit: targetParts(it.trick).unit }))
+    .filter((it) => it.bestCount > 0)
     .sort((a, b) => (b.bestCount / b.target) - (a.bestCount / a.target) || b.totalCount - a.totalCount)
     .slice(0, 4)
-    .map((item) => makeInsightItem(
-      item.trick.name,
-      `${item.trick.kind} / 最高 ${item.bestCount}/${item.target}${item.unit}`,
-      "もう少し"
-    ));
+    .map((it) => makeInsightItem(it.trick.name, `${it.trick.kind} / 最高 ${it.bestCount}/${it.target}${it.unit}`, "もう少し"));
 
   const kindItems = kindStats
     .sort((a, b) => b.totalCount - a.totalCount)
     .slice(0, 5)
-    .map((item) => makeInsightItem(
-      item.kind,
-      `${item.trickIds.size}技 / ${item.practicedDays.size}日`,
-      `${item.totalCount}回`
-    ));
+    .map((it) => makeInsightItem(it.kind, `${it.trickIds.size}技 / ${it.practicedDays.size}日`, `${it.totalCount}回`));
 
   const dayItems = Array.from(practiceDays)
     .sort((a, b) => b.localeCompare(a))
     .slice(0, 7)
     .map((date) => {
-      const dayRecords = records.filter((record) => record.date === date);
-      const dayCount = dayRecords.reduce((sum, record) => sum + record.count, 0);
-      const goalCount = dayRecords.filter((record) => record.goalCleared).length;
-      return makeInsightItem(
-        date,
-        `${dayRecords.length}技 / 目標クリア ${goalCount}技`,
-        `${dayCount}回`
-      );
+      const dr = records.filter((r) => r.date === date);
+      const dc = dr.reduce((s, r) => s + r.count, 0);
+      const gc = dr.filter((r) => r.goalCleared).length;
+      return makeInsightItem(date, `${dr.length}技 / 目標クリア ${gc}技`, `${dc}回`);
     });
-  const videoItems = (state.videoUploads || [])
-    .slice(0, 8)
-    .map(makeVideoInsightItem);
+
+  const videoItems = videos.slice(0, 8).map(makeVideoInsightItem);
 
   renderInsightList(els.weaponList, weaponItems, "記録が増えると、武器になってきた技がここに出ます。");
   renderInsightList(els.almostList, almostItems, "あと少しでクリアの技が、ここに出ます。");
@@ -998,10 +833,10 @@ function renderGrowth() {
 }
 
 function renderPinned() {
-  const pinned = state.pinnedToday.map(findTrick).filter(Boolean);
+  const pinned = (pinnedTodayDoc.trickIds || []).map(findTrick).filter(Boolean);
   els.parentSummary.textContent = `${pinned.length}個`;
   els.pinnedHelp.hidden = pinned.length > 0;
-  els.homePinnedList.replaceChildren(...pinned.map((trick) => renderCard(trick, { compact: true })));
+  els.homePinnedList.replaceChildren(...pinned.map((t) => renderCard(t, { compact: true })));
 
   if (!pinned.length) {
     const empty = document.createElement("p");
@@ -1025,9 +860,9 @@ function renderPinned() {
   }
 
   els.parentPickList.replaceChildren(...tricks.map((trick) => {
-    const pinnedNow = state.pinnedToday.includes(trick.id);
+    const isPinned = (pinnedTodayDoc.trickIds || []).includes(trick.id);
     const row = document.createElement("div");
-    row.className = `parent-pick-item${pinnedNow ? " selected" : ""}`;
+    row.className = `parent-pick-item${isPinned ? " selected" : ""}`;
     const body = document.createElement("div");
     const name = document.createElement("strong");
     name.textContent = `${trick.no}. ${trick.name}`;
@@ -1036,19 +871,20 @@ function renderPinned() {
     body.append(name, meta);
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `pick-button${pinnedNow ? " selected" : ""}`;
-    button.textContent = pinnedNow ? "外す" : "追加";
+    button.className = `pick-button${isPinned ? " selected" : ""}`;
+    button.textContent = isPinned ? "外す" : "追加";
     button.addEventListener("click", () => togglePinned(trick.id));
     row.append(body, button);
     return row;
   }));
 }
 
-function render() {
+function rerender() {
+  if (!tricks.length) return;
   ensureDailyFocus();
   renderChips();
   const focus = focusTricks();
-  const focusGoalCleared = focus.filter((trick) => progressFor(trick.id).goalCleared).length;
+  const focusGoalCleared = focus.filter((t) => progressFor(t.id).goalCleared).length;
   const total = tricks.length;
   const remaining = Math.max(focus.length - focusGoalCleared, 0);
   els.doneCount.textContent = focusGoalCleared;
@@ -1057,49 +893,19 @@ function render() {
   els.remainingLabel.textContent = `まずは残り ${remaining} 技`;
   els.progressBar.style.width = focus.length ? `${Math.round((focusGoalCleared / focus.length) * 100)}%` : "0%";
   renderDoneList();
-
-  els.focusList.replaceChildren(...focus.map((trick) => renderCard(trick, { compact: true })));
+  els.focusList.replaceChildren(...focus.map((t) => renderCard(t, { compact: true })));
   renderRoutines();
   renderPinned();
-  renderNextChallenge();
-
   const rows = filteredTricks();
   els.emptyState.hidden = !(todayGoalClearedIds().length === total && total > 0);
-  els.trickList.replaceChildren(...rows.map((trick) => renderCard(trick)));
+  els.trickList.replaceChildren(...rows.map((t) => renderCard(t)));
   renderLibrary();
   renderGrowth();
 }
 
-els.searchInput.addEventListener("input", (event) => {
-  state.query = event.target.value;
-  saveState();
-  render();
-});
-
-els.doneToggle.addEventListener("click", () => {
-  els.doneList.hidden = !els.doneList.hidden;
-});
-
-els.clearPinnedButton.addEventListener("click", () => {
-  state.pinnedToday = [];
-  saveState();
-  render();
-});
-
-els.drawNextButton.addEventListener("click", drawNextChallenge);
-
-els.saveUploadSettingsButton.addEventListener("click", () => {
-  state.uploadSettings = {
-    endpoint: els.uploadEndpointInput.value.trim(),
-    token: els.uploadTokenInput.value.trim(),
-  };
-  saveState();
-  els.uploadSettingsStatus.textContent = state.uploadSettings.endpoint
-    ? "動画保存先を保存しました。"
-    : "URLが空です。動画保存はまだ使えません。";
-});
-
-els.testUploadSettingsButton.addEventListener("click", testUploadConnection);
+els.searchInput.addEventListener("input", (e) => { local.query = e.target.value; saveLocal(); rerender(); });
+els.doneToggle.addEventListener("click", () => { els.doneList.hidden = !els.doneList.hidden; });
+els.clearPinnedButton.addEventListener("click", clearPinned);
 
 document.querySelectorAll("[data-view-target]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -1107,8 +913,4 @@ document.querySelectorAll("[data-view-target]").forEach((button) => {
     document.querySelectorAll(".app-view").forEach((view) => view.classList.toggle("active-view", view.id === button.dataset.viewTarget));
     window.scrollTo({ top: 0, behavior: "smooth" });
   });
-});
-
-boot().catch((error) => {
-  els.focusList.innerHTML = `<div class="empty-state"><h2>読み込みに失敗しました</h2><p>${error.message}</p></div>`;
 });
