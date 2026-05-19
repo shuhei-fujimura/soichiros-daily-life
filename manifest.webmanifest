@@ -1,6 +1,6 @@
 {
-  "name": "全部チャレンジ",
-  "short_name": "全部チャレンジ",
+  "name": "Soichiro's Daily Life",
+  "short_name": "Daily Life",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#f5f7fb",

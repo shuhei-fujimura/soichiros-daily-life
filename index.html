@@ -4,28 +4,48 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#1d4ed8" />
-    <title>全部チャレンジ</title>
+    <title>Soichiro's Daily Life</title>
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="stylesheet" href="./styles.css?v=20260519-5" />
+    <link rel="stylesheet" href="./styles.css?v=20260519-v10" />
   </head>
   <body>
     <div class="app-shell">
       <header class="topbar">
         <div>
           <p class="kicker">Skate Practice</p>
-          <h1>全部チャレンジ</h1>
+          <h1>Soichiro's Daily Life</h1>
           <p class="hero-message">
             できないのは当たり前、まずはやってみることから始めよう！
             <span id="dailyMessage"></span>
           </p>
         </div>
-        <div class="score" aria-label="今日できた数">
+        <div class="score" aria-label="まずはこの5つの達成数">
           <span id="doneCount">0</span>
           <small>/<span id="totalCount">0</span></small>
         </div>
       </header>
 
       <main>
+        <nav class="view-tabs" aria-label="ページ切り替え">
+          <button class="view-tab active" type="button" data-view-target="homeView">ホーム</button>
+          <button class="view-tab" type="button" data-view-target="listView">技一覧</button>
+          <button class="view-tab" type="button" data-view-target="libraryView">図鑑</button>
+          <button class="view-tab" type="button" data-view-target="growthView">成長</button>
+          <button class="view-tab" type="button" data-view-target="parentView">親設定</button>
+        </nav>
+
+        <section id="homeView" class="app-view active-view">
+          <section class="mission-panel" aria-label="まずはこの5つ">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Today's 5</p>
+                <h2>まずはこの5つ</h2>
+              </div>
+              <span id="missionSummary" class="summary-pill">0/5</span>
+            </div>
+            <div id="focusList" class="horizontal-list"></div>
+          </section>
+
         <section class="progress-panel" aria-label="今日の進捗">
           <div class="progress-copy">
             <span id="todayLabel"></span>
@@ -36,6 +56,62 @@
           </div>
         </section>
 
+          <section class="pinned-panel" aria-label="今日のチャレンジミッション">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Challenge Mission</p>
+                <h2>今日のチャレンジミッション</h2>
+              </div>
+              <button id="clearPinnedButton" class="small-button" type="button">クリア</button>
+            </div>
+            <p id="pinnedHelp" class="panel-note">親設定ページで、今日やる技を選べます。</p>
+            <div id="homePinnedList" class="horizontal-list"></div>
+          </section>
+
+          <section class="next-panel" aria-label="次のチャレンジ">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Next Challenge</p>
+                <h2>次のチャレンジ</h2>
+              </div>
+            </div>
+            <div id="gachaMachine" class="gacha-machine">
+              <div class="gacha-dome" aria-hidden="true">
+                <span class="mini-capsule cap-1"></span>
+                <span class="mini-capsule cap-2"></span>
+                <span class="mini-capsule cap-3"></span>
+                <span class="mini-capsule cap-4"></span>
+                <span class="mini-capsule cap-5"></span>
+                <span class="mini-capsule cap-6"></span>
+              </div>
+              <div class="gacha-body">
+                <div class="gacha-window" aria-hidden="true">
+                  <span id="gachaBall" class="gacha-ball"></span>
+                </div>
+                <button id="drawNextButton" class="gacha-handle" type="button" aria-label="次のチャレンジを回す">
+                  <span></span>
+                </button>
+              </div>
+              <div class="gacha-chute" aria-hidden="true">
+                <span class="gacha-door"></span>
+              </div>
+            </div>
+            <p id="nextHelp" class="panel-note">ハンドルをタップすると、カプセルから次のチャレンジが出ます。</p>
+            <div id="nextChallengeResult" class="next-result"></div>
+          </section>
+
+          <section class="routine-panel" aria-label="組み合わせてやってみよう">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Routine</p>
+                <h2>組み合わせてやってみよう</h2>
+              </div>
+            </div>
+            <div id="routineList" class="routine-list"></div>
+          </section>
+        </section>
+
+        <section id="listView" class="app-view">
         <section class="controls" aria-label="検索と絞り込み">
           <label class="search-box">
             <span>技を検索</span>
@@ -59,6 +135,111 @@
         </section>
 
         <section id="trickList" class="trick-list" aria-label="残っている技"></section>
+        </section>
+
+        <section id="libraryView" class="app-view">
+          <section class="library-panel" aria-label="できた図鑑">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Collection</p>
+                <h2>できた図鑑</h2>
+              </div>
+              <span id="librarySummary" class="summary-pill">0/99</span>
+            </div>
+            <div class="stats-grid">
+              <div>
+                <span id="landedCount">0</span>
+                <small>1回以上できた</small>
+              </div>
+              <div>
+                <span id="goalClearedCount">0</span>
+                <small>目標クリア</small>
+              </div>
+            </div>
+            <div id="libraryList" class="library-list"></div>
+          </section>
+        </section>
+
+        <section id="growthView" class="app-view">
+          <section class="growth-panel" aria-label="成長メモ">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Growth Log</p>
+                <h2>成長メモ</h2>
+              </div>
+              <span id="growthSummary" class="summary-pill">0日</span>
+            </div>
+            <div class="growth-stats">
+              <div>
+                <span id="practiceDaysCount">0</span>
+                <small>練習した日</small>
+              </div>
+              <div>
+                <span id="totalPracticeCount">0</span>
+                <small>できた合計</small>
+              </div>
+              <div>
+                <span id="weaponKind">-</span>
+                <small>武器になりそう</small>
+              </div>
+              <div>
+                <span id="stretchKind">-</span>
+                <small>のびしろ</small>
+              </div>
+            </div>
+
+            <div class="growth-grid">
+              <section class="growth-card" aria-label="武器になってきた技">
+                <h3>武器になってきた</h3>
+                <div id="weaponList" class="insight-list"></div>
+              </section>
+              <section class="growth-card" aria-label="もう少しでクリアの技">
+                <h3>もう少しでクリア</h3>
+                <div id="almostList" class="insight-list"></div>
+              </section>
+              <section class="growth-card" aria-label="最近よく練習している種類">
+                <h3>最近よく練習している種類</h3>
+                <div id="kindBalanceList" class="insight-list"></div>
+              </section>
+              <section class="growth-card" aria-label="日ごとの記録">
+                <h3>日ごとの記録</h3>
+                <div id="dailyLogList" class="insight-list"></div>
+              </section>
+              <section class="growth-card" aria-label="動画の記録">
+                <h3>動画の記録</h3>
+                <div id="videoLogList" class="insight-list"></div>
+              </section>
+            </div>
+          </section>
+        </section>
+
+        <section id="parentView" class="app-view">
+          <section class="parent-panel" aria-label="今日のチャレンジミッションを選ぶ">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Parent Pick</p>
+                <h2>今日のチャレンジミッションを選ぶ</h2>
+              </div>
+              <span id="parentSummary" class="summary-pill">0個</span>
+            </div>
+            <p class="panel-note">このページだけで、トップに固定する技を選べます。この端末に保存されます。</p>
+            <div class="upload-settings" aria-label="動画保存設定">
+              <h3>動画保存設定</h3>
+              <label>
+                <span>Apps Script WebアプリURL</span>
+                <input id="uploadEndpointInput" type="url" placeholder="https://script.google.com/macros/s/..." autocomplete="off" />
+              </label>
+              <label>
+                <span>合言葉</span>
+                <input id="uploadTokenInput" type="password" placeholder="Apps Script側と同じ文字" autocomplete="off" />
+              </label>
+              <button id="saveUploadSettingsButton" class="small-button primary-small-button" type="button">保存</button>
+              <p id="uploadSettingsStatus" class="panel-note"></p>
+            </div>
+            <div id="parentPinnedList" class="library-list"></div>
+            <div id="parentPickList" class="parent-pick-list"></div>
+          </section>
+        </section>
       </main>
     </div>
 
@@ -79,12 +260,13 @@
           <p class="memo"></p>
           <div class="actions">
             <a class="video-button" target="_blank" rel="noreferrer">動画を見る</a>
-            <button class="done-button" type="button">できた</button>
+            <button class="upload-video-button" type="button">動画を撮る</button>
+            <button class="done-button" type="button">+ できた</button>
           </div>
         </div>
       </article>
     </template>
 
-    <script src="./app.js?v=20260519-5"></script>
+    <script src="./app.js?v=20260519-v10"></script>
   </body>
 </html>
