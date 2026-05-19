@@ -24,6 +24,12 @@ const auth = getAuth(fb);
 const db = getFirestore(fb);
 const storage = getStorage(fb);
 
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch((e) => console.warn("SW register failed:", e));
+  });
+}
+
 const LOCAL_KEY = "skate_local_v3";
 const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
 const HISTORY_DAYS = 60;
