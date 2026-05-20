@@ -51,4 +51,4 @@
 
 - Claude Code 自体の使い方 → claude-code-guide subagent
 - Firebaseの設定方法 → Firebase公式ドキュメント or claude-code-guide
-- 緊急時の連絡先: 自分（修平）/ 妻
+- 緊急時の連絡先: 自分（脩平）/ 妻
