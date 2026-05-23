@@ -581,6 +581,72 @@ main {
   color: #805a00;
 }
 
+.video-source-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(15, 23, 42, .42);
+}
+
+.video-source-panel {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, .45);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .98);
+  box-shadow: 0 24px 50px rgba(15, 23, 42, .24);
+}
+
+.video-source-option,
+.video-source-cancel {
+  width: 100%;
+  border-radius: 14px;
+  font-weight: 900;
+}
+
+.video-source-option {
+  display: grid;
+  gap: 3px;
+  min-height: 64px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+}
+
+.video-source-option span {
+  font-size: 16px;
+}
+
+.video-source-option small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.video-source-option.camera {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.video-source-option.library {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.video-source-cancel {
+  min-height: 48px;
+  border: 0;
+  background: #e5e7eb;
+  color: var(--muted);
+}
+
 .done-button {
   border: 0;
   background: var(--blue);

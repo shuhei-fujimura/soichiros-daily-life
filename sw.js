@@ -1,4 +1,4 @@
-const CACHE = "soichiro-daily-life-v1";
+const CACHE = "soichiro-daily-life-v2";
 const PRECACHE_URLS = [
   "./",
   "./index.html",

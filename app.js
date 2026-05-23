@@ -411,13 +411,71 @@ async function clearPinned() {
 
 // ───── 動画アップロード ─────
 
-function pickVideoFile() {
+function selectVideoFile({ capture = false } = {}) {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "video/*";
-    input.addEventListener("change", () => resolve(input.files?.[0] || null), { once: true });
+    if (capture) input.setAttribute("capture", "environment");
+    input.hidden = true;
+    const finish = (file = null) => {
+      input.remove();
+      resolve(file);
+    };
+    input.addEventListener("change", () => finish(input.files?.[0] || null), { once: true });
+    input.addEventListener("cancel", () => finish(null), { once: true });
+    document.body.append(input);
     input.click();
+  });
+}
+
+function pickVideoFile() {
+  return new Promise((resolve) => {
+    const sheet = document.createElement("div");
+    sheet.className = "video-source-sheet";
+    sheet.innerHTML = `
+      <div class="video-source-panel" role="dialog" aria-modal="true" aria-label="動画の追加方法">
+        <button class="video-source-option camera" type="button">
+          <span>カメラで撮る</span>
+          <small>今すぐ動画を撮影</small>
+        </button>
+        <button class="video-source-option library" type="button">
+          <span>ファイルから選ぶ</span>
+          <small>保存済みの動画を選択</small>
+        </button>
+        <button class="video-source-cancel" type="button">キャンセル</button>
+      </div>
+    `;
+
+    let closed = false;
+    const onKeydown = (event) => {
+      if (event.key === "Escape") close(null);
+    };
+    const close = (filePromise) => {
+      if (closed) return;
+      closed = true;
+      document.removeEventListener("keydown", onKeydown);
+      sheet.remove();
+      if (!filePromise) {
+        resolve(null);
+        return;
+      }
+      filePromise.then(resolve);
+    };
+
+    sheet.querySelector(".camera").addEventListener("click", () => {
+      close(selectVideoFile({ capture: true }));
+    });
+    sheet.querySelector(".library").addEventListener("click", () => {
+      close(selectVideoFile());
+    });
+    sheet.querySelector(".video-source-cancel").addEventListener("click", () => close(null));
+    sheet.addEventListener("click", (event) => {
+      if (event.target === sheet) close(null);
+    });
+    document.addEventListener("keydown", onKeydown);
+
+    document.body.append(sheet);
   });
 }
 
